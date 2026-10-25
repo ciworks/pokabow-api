@@ -3,7 +3,8 @@ import { db } from "../db.js";
 import { runOnlineRules } from "../game/online-rules.js";
 import type { RulesRunner, RulesState } from "../game/rules-contract.js";
 import { awardOnlineMatch } from "./player-progression.js";
-import { onlineGemShares, recordPendingOnlineGems, settleOnlineGems } from "./gem-wallet.js";
+import { GEM_POLICY_VERSION, onlineGemShares, recordPendingOnlineGems, settleOnlineGems,
+  onlineGemEarningsStatus } from "./gem-wallet.js";
 
 export class OnlineError extends Error {
   constructor(public code: string, public status = 409) { super(code); }
@@ -11,7 +12,7 @@ export class OnlineError extends Error {
 type MatchRow = {
   id: string; player_a: string | null; player_b: string | null; state: RulesState;
   version: number; status: string; deadline_at: Date | null;
-  last_seen_a: Date; last_seen_b: Date; gem_policy_version: string;
+  last_seen_a: Date; last_seen_b: Date; gem_policy_version: string; gem_pair_eligible: boolean;
 };
 export type OnlineCommand = {
   commandId: string; expectedVersion: number; action: "place" | "swap" | "resign";
@@ -47,7 +48,7 @@ export function createOnlineGameService(pool: Pick<Pool, "connect"> = db, rules:
     await client.query("SAVEPOINT gem_wallet_credit");
     try {
       await settleOnlineGems(client, match.id, match.player_a, match.player_b,
-        snapshot, match.gem_policy_version);
+        snapshot, match.gem_policy_version, match.gem_pair_eligible);
     } catch {
       await client.query("ROLLBACK TO SAVEPOINT gem_wallet_credit");
       await recordPendingOnlineGems(client, match.id, snapshot, match.gem_policy_version);
@@ -71,24 +72,38 @@ export function createOnlineGameService(pool: Pick<Pool, "connect"> = db, rules:
     const otherId = seat === "human" ? match.player_b : match.player_a;
     const otherSeen = seat === "human" ? match.last_seen_b : match.last_seen_a;
     const user = otherId ? (await client.query("SELECT display_name FROM users WHERE id = $1", [otherId])).rows[0] : null;
-    const settled = match.status === "completed" ? (await client.query<{ status: string; pot_total: string; policy_version: string }>(
-      "SELECT status, pot_total::text, policy_version FROM online_gem_settlements WHERE match_id = $1", [match.id])).rows[0] : null;
+    const settled = match.status === "completed" ? (await client.query<{ status: string; pot_total: string;
+      policy_version: string; pot_a: string | null; pot_b: string | null;
+      completion_a: string | null; completion_b: string | null }>(
+      `SELECT status, pot_total::text, policy_version, pot_a::text, pot_b::text,
+        completion_a::text, completion_b::text FROM online_gem_settlements WHERE match_id = $1`, [match.id])).rows[0] : null;
     const shares = settled?.status === "confirmed" ? onlineGemShares(match.state.snapshot.outcome,
       Number(match.state.snapshot.end_reason ?? 0), Number(settled.pot_total)) : null;
-    const ownPot = shares ? (seat === "human" ? shares.humanPot : shares.aiPot) : 0;
-    const rivalPot = shares ? (seat === "human" ? shares.aiPot : shares.humanPot) : 0;
+    const limited = settled?.policy_version === GEM_POLICY_VERSION;
+    const ownPot = shares ? (limited ? Number(seat === "human" ? settled.pot_a : settled.pot_b) :
+      seat === "human" ? shares.humanPot : shares.aiPot) : 0;
+    const rivalPot = shares ? (limited ? Number(seat === "human" ? settled.pot_b : settled.pot_a) :
+      seat === "human" ? shares.aiPot : shares.humanPot) : 0;
+    const ownCompletion = shares ? (limited ? Number(seat === "human" ? settled.completion_a : settled.completion_b) :
+      match.player_a && match.player_b ? shares.completion : 0) : 0;
+    const rivalCompletion = shares ? (limited ? Number(seat === "human" ? settled.completion_b : settled.completion_a) :
+      match.player_a && match.player_b ? shares.completion : 0) : 0;
+    const earnings = match.gem_policy_version === GEM_POLICY_VERSION ?
+      await onlineGemEarningsStatus(client, playerId, otherId) : null;
     return {
       matchId: match.id, version: match.version, status: match.status,
       serverTime: time.getTime() / 1000, deadline: null,
       opponent: { id: otherId, displayName: user?.display_name ?? "Opponent", connected: Boolean(otherId && time.getTime() - otherSeen.getTime() < 15000) },
       ...match.state.views[seat],
+      gemPolicyVersion: match.gem_policy_version,
+      gemEarnings: earnings ? { ...earnings, pairEligible: match.gem_pair_eligible,
+        eligible: match.gem_pair_eligible && (earnings.dailyRemaining > 0 || ownPot + ownCompletion > 0) } : null,
       gemSettlementStatus: match.status === "completed" ? settled?.status ?? "ineligible" : "none",
       gemSettlement: settled && shares ? {
         policyVersion: settled.policy_version, potTotal: Number(settled.pot_total),
-        humanPot: ownPot, rivalPot, humanCompletion: match.player_a && match.player_b ? shares.completion : 0,
-        rivalCompletion: match.player_a && match.player_b ? shares.completion : 0,
-        humanTotal: ownPot + (match.player_a && match.player_b ? shares.completion : 0),
-        rivalTotal: rivalPot + (match.player_a && match.player_b ? shares.completion : 0),
+        humanPot: ownPot, rivalPot, humanCompletion: ownCompletion,
+        rivalCompletion, humanTotal: ownPot + ownCompletion,
+        rivalTotal: rivalPot + rivalCompletion,
       } : null,
     };
   }

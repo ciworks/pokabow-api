@@ -4,6 +4,7 @@ import { randomInt } from "node:crypto";
 import { onlineRulesAvailable, runOnlineRules } from "../game/online-rules.js";
 import type { RulesRunner } from "../game/rules-contract.js";
 import { INITIAL_SKILL, tierForSkill } from "./player-progression.js";
+import { GEM_POLICY_VERSION, onlineGemEarningsStatus } from "./gem-wallet.js";
 
 export const MATCHMAKING_RULES_VERSION = "pokabow-v3";
 export const MATCHMAKING_LEASE_SECONDS = 30;
@@ -130,6 +131,7 @@ export function createMatchmakingService(
         canReady: rulesAvailable(),
         ready: ticket.ready, opponentReady: opponent.ready,
         matchId: ticket.status === "playing" ? ticket.lobby_id : null,
+        gemEarnings: await onlineGemEarningsStatus(client, ticket.user_id, opponent.id),
       };
     }
     return {
@@ -153,9 +155,12 @@ export function createMatchmakingService(
           const lobby = (await client.query("SELECT * FROM matchmaking_lobbies WHERE id = $1", [ticket.lobby_id])).rows[0];
           const state = await rules({ action: "create", matchId: ticket.lobby_id, seed: randomInt(1, 2147483647) });
           if ("error" in state) throw new Error(state.error);
-          await client.query(`INSERT INTO online_matches (id, lobby_id, player_a, player_b, state)
-            VALUES ($1, $1, $2, $3, $4)`,
-          [ticket.lobby_id, lobby.player_a, lobby.player_b, JSON.stringify(state)]);
+          const eligibility = await onlineGemEarningsStatus(client, lobby.player_a, lobby.player_b);
+          await client.query(`INSERT INTO online_matches
+            (id, lobby_id, player_a, player_b, state, gem_policy_version, gem_pair_eligible)
+            VALUES ($1, $1, $2, $3, $4, $5, $6)`,
+          [ticket.lobby_id, lobby.player_a, lobby.player_b, JSON.stringify(state), GEM_POLICY_VERSION,
+            eligibility.pairMatchesRemaining !== 0]);
           await client.query("UPDATE matchmaking_tickets SET status = 'playing' WHERE lobby_id = $1", [ticket.lobby_id]);
         }
         return response(client, await read(client, playerId, id));

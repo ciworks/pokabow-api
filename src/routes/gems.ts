@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { authenticate } from "../auth/authenticate.js";
-import { readGemWallet } from "../services/gem-wallet.js";
+import { onlineGemEarningsStatus, readGemWallet } from "../services/gem-wallet.js";
+import { db } from "../db.js";
 import { config } from "../config.js";
 import { rewardedAdStatus, settleRewardedAd, startRewardedAd,
   verifyRewardedAdCallback } from "../services/rewarded-ad.js";
@@ -11,6 +12,8 @@ export async function gemRoutes(app: FastifyInstance) {
     const wallet = await readGemWallet(request.user.sub);
     return wallet ?? reply.code(404).send({ error: "USER_NOT_FOUND" });
   });
+  app.get("/online-earnings", { onRequest: authenticate }, async request =>
+    onlineGemEarningsStatus(db, request.user.sub));
   app.get("/rewarded-ad/status", { onRequest: authenticate }, async request =>
     rewardedAdStatus(request.user.sub));
   app.post("/rewarded-ad/session", { onRequest: authenticate }, async (request, reply) => {

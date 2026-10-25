@@ -1,8 +1,12 @@
 import type { Pool, PoolClient } from "pg";
 import { db } from "../db.js";
 
-export const GEM_POLICY_VERSION = "gem-pot-v1";
+export const LEGACY_GEM_POLICY_VERSION = "gem-pot-v1";
+export const GEM_POLICY_VERSION = "gem-pot-v2";
 export const AI_GEM_POLICY_VERSION = "ai-gem-pot-v1";
+export const ONLINE_POT_CAP = 40;
+export const ONLINE_DAILY_CAP = 100;
+export const ONLINE_PAIR_MATCH_LIMIT = 2;
 const COMPLETION_GEMS = 10;
 const HAND_GEMS: Record<string, number> = {
   PAIR: 2, TWO_PAIR: 4, STRAIGHT_3: 6, THREE_OF_A_KIND: 8,
@@ -12,7 +16,7 @@ type Snapshot = { outcome: number; end_reason?: number; ledger?: { events?: unkn
 type ScoreEvent = { event_id?: unknown; category?: unknown; evidence?: { category?: unknown } };
 
 /** Call only with the snapshot returned by the authoritative rules worker. */
-export function onlineGemPot(snapshot: Snapshot): number {
+export function onlineGemPot(snapshot: Snapshot, policy = LEGACY_GEM_POLICY_VERSION): number {
   const seen = new Set<string>();
   let total = 0;
   for (const raw of snapshot.ledger?.events ?? []) {
@@ -24,7 +28,26 @@ export function onlineGemPot(snapshot: Snapshot): number {
       total += HAND_GEMS[event.evidence.category] ?? 0;
     }
   }
-  return total;
+  return policy === GEM_POLICY_VERSION ? Math.min(total, ONLINE_POT_CAP) : total;
+}
+
+export async function onlineGemEarningsStatus(client: Pick<Pool, "query">, userId: string,
+  opponentId?: string | null) {
+  const earned = await client.query<{ total: string }>(`SELECT COALESCE(SUM(amount), 0)::text AS total
+    FROM gem_transactions WHERE user_id = $1 AND kind IN ('online_pot', 'online_completion')
+      AND created_at > clock_timestamp() - interval '24 hours'`, [userId]);
+  const dailyRemaining = Math.max(0, ONLINE_DAILY_CAP - Number(earned.rows[0].total));
+  let pairMatchesRemaining: number | null = null;
+  if (opponentId) {
+    const recent = await client.query<{ count: string }>(`SELECT COUNT(*)::text AS count FROM online_matches
+      WHERE status = 'completed' AND completed_at > clock_timestamp() - interval '24 hours'
+        AND ((player_a = $1 AND player_b = $2) OR (player_a = $2 AND player_b = $1))`,
+    [userId, opponentId]);
+    pairMatchesRemaining = Math.max(0, ONLINE_PAIR_MATCH_LIMIT - Number(recent.rows[0].count));
+  }
+  return { potCap: ONLINE_POT_CAP, dailyCap: ONLINE_DAILY_CAP, dailyRemaining,
+    pairMatchLimit: ONLINE_PAIR_MATCH_LIMIT, pairMatchesRemaining,
+    eligible: dailyRemaining > 0 && pairMatchesRemaining !== 0 };
 }
 
 export function onlineGemShares(outcome: number, endReason: number, pot: number) {
@@ -63,10 +86,10 @@ async function grant(client: PoolClient, userId: string, matchId: string,
 
 /** In the transaction that commits a terminal match, so a failed grant rolls back the result. */
 export async function settleOnlineGems(client: PoolClient, matchId: string, playerA: string | null,
-  playerB: string | null, snapshot: Snapshot, policy: string): Promise<void> {
+  playerB: string | null, snapshot: Snapshot, policy: string, pairEligible = true): Promise<void> {
   if (![1, 2, 3].includes(snapshot.outcome)) return;
-  if (policy !== GEM_POLICY_VERSION) throw new Error("UNKNOWN_GEM_POLICY");
-  const pot = onlineGemPot(snapshot);
+  if (![LEGACY_GEM_POLICY_VERSION, GEM_POLICY_VERSION].includes(policy)) throw new Error("UNKNOWN_GEM_POLICY");
+  const pot = onlineGemPot(snapshot, policy);
   await client.query(`INSERT INTO online_gem_settlements (match_id, policy_version, pot_total)
     VALUES ($1, $2, $3) ON CONFLICT (match_id) DO NOTHING`, [matchId, policy, pot]);
   const settlement = (await client.query<{ status: string; policy_version: string; pot_total: string }>(
@@ -74,6 +97,33 @@ export async function settleOnlineGems(client: PoolClient, matchId: string, play
   if (settlement.policy_version !== policy || Number(settlement.pot_total) !== pot) throw new Error("GEM_SETTLEMENT_MISMATCH");
   if (settlement.status === "confirmed") return;
   const shares = onlineGemShares(snapshot.outcome, snapshot.end_reason ?? 0, pot);
+  if (policy === GEM_POLICY_VERSION) {
+    // Serialize all online awards for an account, including retries from another match.
+    for (const userId of [playerA, playerB].filter((id): id is string => Boolean(id)).sort()) {
+      await client.query("SELECT pg_advisory_xact_lock($1, hashtext($2))", [70652602, userId]);
+    }
+    const amountFor = async (userId: string | null, potShare: number, completion: number) => {
+      if (!userId || !pairEligible) return { pot: 0, completion: 0 };
+      const { dailyRemaining } = await onlineGemEarningsStatus(client, userId);
+      const creditedPot = Math.min(potShare, dailyRemaining);
+      return { pot: creditedPot, completion: Math.min(completion, dailyRemaining - creditedPot) };
+    };
+    const a = await amountFor(playerA, shares.humanPot, playerB ? shares.completion : 0);
+    const b = await amountFor(playerB, shares.aiPot, playerA ? shares.completion : 0);
+    if (playerA) {
+      await grant(client, playerA, matchId, "online_pot", a.pot, policy);
+      await grant(client, playerA, matchId, "online_completion", a.completion, policy);
+    }
+    if (playerB) {
+      await grant(client, playerB, matchId, "online_pot", b.pot, policy);
+      await grant(client, playerB, matchId, "online_completion", b.completion, policy);
+    }
+    await client.query(`UPDATE online_gem_settlements SET status = 'confirmed',
+      pot_a = $2, pot_b = $3, completion_a = $4, completion_b = $5,
+      confirmed_at = clock_timestamp() WHERE match_id = $1`,
+    [matchId, a.pot, b.pot, a.completion, b.completion]);
+    return;
+  }
   if (playerA) {
     await grant(client, playerA, matchId, "online_pot", shares.humanPot, policy);
     if (playerB) await grant(client, playerA, matchId, "online_completion", shares.completion, policy);
@@ -87,7 +137,7 @@ export async function settleOnlineGems(client: PoolClient, matchId: string, play
 }
 
 export async function recordPendingOnlineGems(client: PoolClient, matchId: string, snapshot: Snapshot, policy: string) {
-  const pot = onlineGemPot(snapshot);
+  const pot = onlineGemPot(snapshot, policy);
   await client.query(`INSERT INTO online_gem_settlements (match_id, policy_version, pot_total)
     VALUES ($1, $2, $3) ON CONFLICT (match_id) DO NOTHING`, [matchId, policy, pot]);
 }
