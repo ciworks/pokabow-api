@@ -6,7 +6,7 @@ const app = buildApp();
 try {
   await app.listen({
     port: config.port,
-    host: "192.168.0.189"
+    host: "192.168.0.215"
   });
 
   console.log(

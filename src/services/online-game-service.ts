@@ -1,6 +1,7 @@
 import type { Pool, PoolClient } from "pg";
 import { db } from "../db.js";
-import { runOnlineRules, type RulesRunner, type RulesState } from "../game/online-rules.js";
+import { runOnlineRules } from "../game/online-rules.js";
+import type { RulesRunner, RulesState } from "../game/rules-contract.js";
 import { awardOnlineMatch } from "./player-progression.js";
 import { onlineGemShares, recordPendingOnlineGems, settleOnlineGems } from "./gem-wallet.js";
 

@@ -1,7 +1,8 @@
 import { randomInt } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { db } from "../db.js";
-import { runOnlineRules, type RulesRunner, type RulesState } from "../game/online-rules.js";
+import { runOnlineRules } from "../game/online-rules.js";
+import type { RulesRunner, RulesState } from "../game/rules-contract.js";
 import { recordPendingVerifiedAiGems, settleVerifiedAiGems } from "./gem-wallet.js";
 
 type MatchRow = { id: string; user_id: string; state: RulesState; version: number; status: string;

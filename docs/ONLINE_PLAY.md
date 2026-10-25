@@ -1,28 +1,25 @@
 # Authoritative live PvP
 
-Apply migration 008_online_play.sql after 007_matchmaking.sql. Configure GODOT_BIN
-(the main executable, not the Windows console launcher) and ONLINE_RULES_PROJECT
-(the absolute path to the matching Pokabow game checkout). Import that checkout
-once with Godot, then run npm run start. The server must have access to its
-temporary directory and permission to launch the engine.
+Apply migration 008_online_play.sql after 007_matchmaking.sql, then run
+`npm run start`. The API runs authoritative online rules in TypeScript and does
+not need a Godot executable or game checkout.
 
-Run `npm run online:check` before restarting the API. It checks both configured
-paths, migration 008 and an actual Godot match initialization without saving a
-match. Changes to `.env` take effect only after restarting the API process.
+Run `npm run online:check` before restarting the API. It checks migration 008
+and TypeScript match initialization without saving a match. Changes to `.env`
+take effect only after restarting the API process.
 
-Local activation verified on 2026-10-13: migration 008 is applied to the local
-tilegame database, `.env` points to the Godot 4.6 engine in `.runtime/godot` and
-the sibling game checkout, and the API is running on `192.168.0.189:3000`.
+Historical local activation on 2026-10-13 used Godot 4.6 and a sibling game
+checkout, with the API on `192.168.0.215:3000`. The current API no longer uses
+those settings.
 Two Godot clients in an isolated temporary lobby passed readiness, placement,
 board agreement, reconnect and resignation through that running server.
 Temporary accounts and the match were removed. Physical-phone validation is
 still pending. Local server output is in `.runtime/server.log` and
 `.runtime/server-error.log`; the background process ID is in `.runtime/server.pid`.
 
-Online state is isolated from legacy client-owned /games snapshots. The
-server's Godot worker reuses the game's current domain rules. Keep its rules
-checkout and clients on compatible versions; changing those rules while matches
-are active is not supported.
+Online state is isolated from legacy client-owned /games snapshots. The API
+preserves the version 3 match snapshot and existing rule version identifiers.
+Keep clients on compatible rule versions while matches are active.
 
 Both players POST /matchmaking/tickets/{ticketId}/ready; the final readiness
 creates one match with ID equal to the lobby ID. The response and subsequent

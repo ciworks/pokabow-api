@@ -2,6 +2,7 @@ import type { Pool, PoolClient } from "pg";
 import { db } from "../db.js";
 import { randomInt } from "node:crypto";
 import { onlineRulesAvailable, runOnlineRules } from "../game/online-rules.js";
+import type { RulesRunner } from "../game/rules-contract.js";
 import { INITIAL_SKILL, tierForSkill } from "./player-progression.js";
 
 export const MATCHMAKING_RULES_VERSION = "pokabow-v3";
@@ -25,7 +26,11 @@ function searchWidth(deviation: number, waitingSeconds: number): number {
  * Ready-up holds the lock through bounded local rules initialization so that
  * concurrent ready requests create exactly one game.
  */
-export function createMatchmakingService(pool: Pick<Pool, "connect"> = db) {
+export function createMatchmakingService(
+  pool: Pick<Pool, "connect"> = db,
+  rules: RulesRunner = runOnlineRules,
+  rulesAvailable: () => boolean = onlineRulesAvailable,
+) {
   async function transaction<T>(run: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await pool.connect();
     try {
@@ -122,7 +127,7 @@ export function createMatchmakingService(pool: Pick<Pool, "connect"> = db) {
             volatility: opponent.volatility!, ratedMatches: opponent.rated_matches!,
           }) },
         playable: ticket.status === "playing",
-        canReady: onlineRulesAvailable(),
+        canReady: rulesAvailable(),
         ready: ticket.ready, opponentReady: opponent.ready,
         matchId: ticket.status === "playing" ? ticket.lobby_id : null,
       };
@@ -139,14 +144,14 @@ export function createMatchmakingService(pool: Pick<Pool, "connect"> = db) {
         const ticket = await read(client, playerId, id);
         if (ticket.status === "playing") return response(client, ticket);
         if (ticket.status !== "matched" || !ticket.lobby_id) throw new LobbyNotReadyError();
-        if (!onlineRulesAvailable()) throw new LobbyNotReadyError();
+        if (!rulesAvailable()) throw new LobbyNotReadyError();
         await renew(client, ticket);
         await client.query("UPDATE matchmaking_tickets SET ready = TRUE WHERE id = $1", [id]);
         const tickets = await client.query<Ticket>("SELECT * FROM matchmaking_tickets WHERE lobby_id = $1 AND status = 'matched'", [ticket.lobby_id]);
         if (tickets.rows.length === 2 && tickets.rows.every(t => t.ready)) {
           // The same queue lock serializes readiness against departure/expiry.
           const lobby = (await client.query("SELECT * FROM matchmaking_lobbies WHERE id = $1", [ticket.lobby_id])).rows[0];
-          const state = await runOnlineRules({ action: "create", matchId: ticket.lobby_id, seed: randomInt(1, 2147483647) });
+          const state = await rules({ action: "create", matchId: ticket.lobby_id, seed: randomInt(1, 2147483647) });
           if ("error" in state) throw new Error(state.error);
           await client.query(`INSERT INTO online_matches (id, lobby_id, player_a, player_b, state)
             VALUES ($1, $1, $2, $3, $4)`,

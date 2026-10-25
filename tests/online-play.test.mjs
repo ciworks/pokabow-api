@@ -31,8 +31,8 @@ test("online routes require authentication and validate commands strictly", asyn
   } finally { db.query = original; await app.close(); }
 });
 
-test("authoritative online lifecycle against PostgreSQL and the real rules engine", {
-  skip: !process.env.ONLINE_TEST_DATABASE_URL || !process.env.GODOT_BIN || !process.env.ONLINE_RULES_PROJECT,
+test("authoritative online lifecycle against PostgreSQL and TypeScript rules", {
+  skip: !process.env.ONLINE_TEST_DATABASE_URL,
 }, async t => {
   assert.equal((await db.query("SELECT to_regclass('public.users') AS existing")).rows[0].existing, null, "requires an empty disposable database");
   for (const file of ["001_initial.sql", "002_user_auth.sql", "004_oauth_accounts.sql", "005_game_crud.sql", "006_achievements.sql", "007_matchmaking.sql", "008_online_play.sql", "012_player_progression.sql", "013_gem_wallet.sql", "014_verified_ai_matches.sql", "015_verified_ai_gems.sql", "016_remove_turn_deadlines.sql"]) {
