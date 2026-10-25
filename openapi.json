@@ -57,6 +57,31 @@
         }
       }
     },
+    "/gems/rewarded-ad/status": {
+      "get": {
+        "tags": ["Gems"],
+        "summary": "Read this account's rewarded ad availability and next eligible time",
+        "operationId": "getRewardedAdStatus",
+        "responses": {"200": {"description": "Availability, 20-Gem reward and nextAvailableAtUnix"}, "401": {"description": "Authentication required"}}
+      }
+    },
+    "/gems/rewarded-ad/session": {
+      "post": {
+        "tags": ["Gems"],
+        "summary": "Create or reuse a server-bound rewarded ad session",
+        "operationId": "startRewardedAdSession",
+        "responses": {"200": {"description": "Session ID for AdMob SSV custom_data"}, "429": {"description": "24-hour reward cooldown active"}, "503": {"description": "Rewarded ads not configured"}}
+      }
+    },
+    "/gems/rewarded-ad/callback": {
+      "get": {
+        "tags": ["Gems"],
+        "summary": "Receive AdMob's signed server-side reward verification callback",
+        "operationId": "confirmRewardedAd",
+        "security": [],
+        "responses": {"200": {"description": "Verified callback processed idempotently"}, "400": {"description": "Invalid signature or reward data"}}
+      }
+    },
     "/ai-games/": {
       "post": {
         "tags": ["Verified AI"],

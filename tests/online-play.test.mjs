@@ -9,6 +9,7 @@ const { buildApp } = await import("../dist/app.js");
 const { db } = await import("../dist/db.js");
 const { createVerifiedAiGameService } = await import("../dist/services/verified-ai-game-service.js");
 const { runOnlineRules } = await import("../dist/game/online-rules.js");
+const { startRewardedAd, settleRewardedAd } = await import("../dist/services/rewarded-ad.js");
 
 test("online routes require authentication and validate commands strictly", async () => {
   const app = buildApp();
@@ -35,7 +36,7 @@ test("authoritative online lifecycle against PostgreSQL and TypeScript rules", {
   skip: !process.env.ONLINE_TEST_DATABASE_URL,
 }, async t => {
   assert.equal((await db.query("SELECT to_regclass('public.users') AS existing")).rows[0].existing, null, "requires an empty disposable database");
-  for (const file of ["001_initial.sql", "002_user_auth.sql", "004_oauth_accounts.sql", "005_game_crud.sql", "006_achievements.sql", "007_matchmaking.sql", "008_online_play.sql", "012_player_progression.sql", "013_gem_wallet.sql", "014_verified_ai_matches.sql", "015_verified_ai_gems.sql", "016_remove_turn_deadlines.sql"]) {
+  for (const file of ["001_initial.sql", "002_user_auth.sql", "004_oauth_accounts.sql", "005_game_crud.sql", "006_achievements.sql", "007_matchmaking.sql", "008_online_play.sql", "012_player_progression.sql", "013_gem_wallet.sql", "014_verified_ai_matches.sql", "015_verified_ai_gems.sql", "016_remove_turn_deadlines.sql", "017_rewarded_ad_gems.sql"]) {
     await db.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
   }
   const app = buildApp();
@@ -250,6 +251,29 @@ test("authoritative online lifecycle against PostgreSQL and TypeScript rules", {
       assert.equal(recovered.gemSettlementStatus, "confirmed");
       assert.equal(recovered.gemSettlement.potTotal, 0);
       assert.equal((await db.query("SELECT status FROM online_gem_settlements WHERE match_id = $1", [pendingId])).rows[0].status, "confirmed");
+    });
+    await t.test("verified ad settlement credits once and enforces a rolling 24-hour cooldown", async () => {
+      const initial = await startRewardedAd(players[2]);
+      assert.equal(initial.available, true);
+      const before = (await request(2, "GET", "/gems/me")).balance;
+      const first = { sessionId: initial.sessionId, userId: players[2],
+        transactionId: "abcdef0123456789", timestamp: Date.now() };
+      await settleRewardedAd(first);
+      await settleRewardedAd(first);
+      assert.equal((await request(2, "GET", "/gems/me")).balance, before + 20);
+      assert.equal((await startRewardedAd(players[2])).available, false);
+      const other = randomUUID();
+      await db.query("INSERT INTO rewarded_ad_sessions (id, user_id) VALUES ($1, $2)", [other, players[2]]);
+      await settleRewardedAd({ sessionId: other, userId: players[2], transactionId: "abcd9999",
+        timestamp: Date.now() });
+      assert.equal((await request(2, "GET", "/gems/me")).balance, before + 20);
+      assert.equal((await db.query("SELECT count(*)::int n FROM gem_transactions WHERE user_id = $1 AND kind = 'rewarded_ad'", [players[2]])).rows[0].n, 1);
+      await db.query("UPDATE rewarded_ad_sessions SET confirmed_at = now() - interval '24 hours 1 minute' WHERE id = $1", [initial.sessionId]);
+      const renewed = await startRewardedAd(players[2]);
+      assert.equal(renewed.available, true);
+      await settleRewardedAd({ sessionId: renewed.sessionId, userId: players[2],
+        transactionId: "abcd8888", timestamp: Date.now() });
+      assert.equal((await request(2, "GET", "/gems/me")).balance, before + 40);
     });
     await t.test("leaving a lobby prevents late readiness from starting a game", async () => {
       // This scenario tests lobby departure, not a rematch between players whose

@@ -3,7 +3,7 @@
 ## Setup
 
 1. Install dependencies with `npm install`.
-2. Create a PostgreSQL database and apply `migrations/001_initial.sql`, then `migrations/002_user_auth.sql`, `migrations/004_oauth_accounts.sql`, `migrations/005_game_crud.sql`, `migrations/006_achievements.sql`, `migrations/007_matchmaking.sql`, `migrations/008_online_play.sql`, `migrations/009_user_avatars.sql`, `migrations/010_achievement_progress.sql`, `migrations/011_engagement_achievements.sql`, `migrations/012_player_progression.sql`, `migrations/013_gem_wallet.sql`, `migrations/014_verified_ai_matches.sql`, `migrations/015_verified_ai_gems.sql`, and `migrations/016_remove_turn_deadlines.sql` in order. Existing databases should apply any missing migrations in that order. For a development or test database, optionally apply `migrations/003_test_user.sql` after 002.
+2. Create a PostgreSQL database and apply `migrations/001_initial.sql`, then `migrations/002_user_auth.sql`, `migrations/004_oauth_accounts.sql`, `migrations/005_game_crud.sql`, `migrations/006_achievements.sql`, `migrations/007_matchmaking.sql`, `migrations/008_online_play.sql`, `migrations/009_user_avatars.sql`, `migrations/010_achievement_progress.sql`, `migrations/011_engagement_achievements.sql`, `migrations/012_player_progression.sql`, `migrations/013_gem_wallet.sql`, `migrations/014_verified_ai_matches.sql`, `migrations/015_verified_ai_gems.sql`, `migrations/016_remove_turn_deadlines.sql`, and `migrations/017_rewarded_ad_gems.sql` in order. Existing databases should apply any missing migrations in that order. For a development or test database, optionally apply `migrations/003_test_user.sql` after 002.
 3. Set `DATABASE_URL` and `JWT_SECRET` in `.env`. Use a unique random JWT secret of at least 32 bytes. To enable Google sign in, configure a Google OAuth web client and set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` (the exact registered callback URL). See `.env.example`.
 4. Run `npm run start`. The start script builds the TypeScript code first.
 
@@ -78,6 +78,15 @@ or half on a draw; losses and resignations credit zero. The cap follows the
 lowest difficulty used (20/40/80). Existing AI matches and client-supplied
 game snapshots are ineligible. Apply migrations 013 through 015 before deploying
 this API version.
+
+The optional Shop reward grants 20 Gems after a signed AdMob server-side
+verification callback. Apply migration 017, set `ADMOB_REWARDED_AD_UNITS` to the
+production Android/iOS rewarded unit IDs, configure each unit's reward amount
+as 20, and set its SSV callback URL to
+`https://YOUR_API/gems/rewarded-ad/callback`. The client requests an authenticated
+session from `POST /gems/rewarded-ad/session` and displays availability from
+`GET /gems/rewarded-ad/status`. The server grants at most once per account per
+rolling 24 hours. An ad dismissal or unverified client callback grants nothing.
 
 `POST /ai-games/` with `{ "requestId": "<uuid>", "difficulty": 0|1|2 }`
 starts or resumes a server-owned AI match. `GET /ai-games/current` and
