@@ -1,0 +1,5 @@
+CREATE TABLE user_avatars (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    png BYTEA NOT NULL CHECK (octet_length(png) BETWEEN 1 AND 2097152),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pokabow Achievement Catalogue</title>
+  <style>
+    @font-face { font-family: Fredoka; src: url('/admin/fredoka.ttf') format('truetype'); font-weight: 300 700; }
+    :root { color-scheme: light; font-family: Fredoka, system-ui, sans-serif; color: #173D42; background: #F6F2E9; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 24px 16px 60px; }
+    main { max-width: 1000px; margin: auto; }
+    header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+    .mark { width: 48px; height: 48px; border-radius: 15px; background: #F4C86A; display: grid; place-items: center; font-size: 28px; }
+    h1 { font-size: clamp(26px, 4vw, 36px); margin: 0; }
+    h2 { font-size: 24px; margin: 0 0 12px; }
+    p { margin: 4px 0 16px; color: #53686A; }
+    section, .card { background: #DFEAE4; padding: 20px; border-radius: 22px; margin-bottom: 20px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+    label { display: flex; flex-direction: column; gap: 5px; font-size: 15px; font-weight: 600; }
+    input, select, textarea { width: 100%; min-height: 46px; border: 2px solid #89A69C; border-radius: 12px; padding: 8px 12px; color: #173D42; background: #F6F2E9; font: 400 16px Fredoka, sans-serif; }
+    textarea { min-height: 76px; resize: vertical; }
+    input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible { outline: 3px solid #D55E00; outline-offset: 2px; }
+    button { min-height: 48px; border: 0; border-radius: 14px; padding: 9px 20px; background: #F4C86A; color: #173D42; font: 600 17px Fredoka, sans-serif; cursor: pointer; }
+    button:hover { filter: brightness(.96); }
+    button.secondary { background: #F6F2E9; border: 2px solid #173D42; }
+    .actions { display: flex; gap: 12px; align-items: center; margin-top: 14px; }
+    .check { flex-direction: row; align-items: center; gap: 8px; }
+    .check input { width: 22px; min-height: 22px; }
+    .card { background: #F6F2E9; border: 2px solid #DFEAE4; }
+    .card h3 { font-size: 21px; margin: 0 0 4px; }
+    .meta { font-size: 14px; color: #53686A; margin-bottom: 14px; }
+    #message { min-height: 24px; font-weight: 600; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body><main>
+  <header><span class="mark" aria-hidden="true">★</span><div><h1>Achievement Catalogue</h1><p>Create milestones from registered game events.</p></div></header>
+  <section id="login-section"><h2>Admin sign in</h2><p>Use an account listed in the server's ADMIN_EMAILS setting.</p>
+    <form id="login-form" class="grid">
+      <label>Email<input name="email" type="email" autocomplete="username" required></label>
+      <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+      <div class="actions"><button type="submit">Sign in</button></div>
+    </form>
+  </section>
+  <div id="workspace" hidden>
+    <section><h2>Add achievement</h2><p>Metrics are registered in the game client and API. New definitions count events received by the API after creation.</p>
+      <form id="create-form">
+        <div class="grid">
+          <label>ID<input name="id" pattern="[a-z][a-z0-9_]{2,63}" placeholder="two_pair_25" required></label>
+          <label>Title<input name="name" maxlength="80" required></label>
+          <label>Category<input name="category" maxlength="50" value="Hands" required></label>
+          <label>Badge key<input name="badgeKey" pattern="[a-z][a-z0-9_]{0,63}" placeholder="milestone" required></label>
+          <label>Metric<select name="metric"><option value="two_pair_scored">Two Pair scored</option><option value="perfect_match_scored">Perfect Match scored</option><option value="active_days">Distinct UTC visit days</option><option value="login_streak">Consecutive UTC visit days</option></select></label>
+          <label>Target count<input name="target" type="number" min="1" max="100000" value="1" required></label>
+        </div>
+        <label>Description<textarea name="description" maxlength="300" required></textarea></label>
+        <div class="actions"><label class="check"><input name="enabled" type="checkbox" checked>Enabled</label><button type="submit">Add achievement</button></div>
+      </form>
+    </section>
+    <section><h2>Catalogue</h2><p>Titles, descriptions, category, badge key and availability can be edited. Existing trigger metrics and targets are fixed to protect earned progress.</p><div id="catalogue"></div></section>
+  </div>
+  <p id="message" role="status" aria-live="polite"></p>
+</main>
+<script>
+  let token = '';
+  const message = document.querySelector('#message');
+  const workspace = document.querySelector('#workspace');
+  const catalogue = document.querySelector('#catalogue');
+  async function api(path, options = {}) {
+    const response = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(options.headers || {}) } });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+    return body;
+  }
+  function field(form, label, name, value, kind = 'input') {
+    const wrapper = document.createElement('label');
+    wrapper.textContent = label;
+    const control = document.createElement(kind);
+    control.name = name;
+    control.value = value ?? '';
+    if (kind === 'input') control.maxLength = name === 'name' ? 80 : 64;
+    wrapper.append(control);
+    form.append(wrapper);
+    return control;
+  }
+  async function refresh() {
+    const rows = await api('/admin/api/achievements');
+    catalogue.replaceChildren();
+    for (const row of rows) {
+      const card = document.createElement('form');
+      card.className = 'card';
+      const heading = document.createElement('h3');
+      heading.textContent = row.name;
+      card.append(heading);
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = `${row.id} · ${row.metric || 'legacy unlock'} · target ${row.target}`;
+      card.append(meta);
+      const grid = document.createElement('div');
+      grid.className = 'grid';
+      field(grid, 'Title', 'name', row.name);
+      field(grid, 'Category', 'category', row.category);
+      field(grid, 'Badge key', 'badgeKey', row.badgeKey || 'milestone');
+      card.append(grid);
+      field(card, 'Description', 'description', row.description, 'textarea');
+      const actions = document.createElement('div');
+      actions.className = 'actions';
+      const enabled = document.createElement('label');
+      enabled.className = 'check';
+      const toggle = document.createElement('input');
+      toggle.type = 'checkbox'; toggle.name = 'enabled'; toggle.checked = row.enabled;
+      enabled.append(toggle, document.createTextNode('Enabled'));
+      const save = document.createElement('button');
+      save.type = 'submit'; save.textContent = 'Save';
+      actions.append(enabled, save); card.append(actions);
+      card.addEventListener('submit', async event => {
+        event.preventDefault();
+        const values = Object.fromEntries(new FormData(card).entries());
+        values.enabled = toggle.checked;
+        try { await api(`/admin/api/achievements/${encodeURIComponent(row.id)}`, { method: 'PATCH', body: JSON.stringify(values) }); message.textContent = `${row.id} saved.`; await refresh(); }
+        catch (error) { message.textContent = error.message; }
+      });
+      catalogue.append(card);
+    }
+  }
+  document.querySelector('#login-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const values = Object.fromEntries(new FormData(event.target).entries());
+    try {
+      const response = await fetch('/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || 'Sign in failed');
+      token = body.token;
+      await refresh();
+      workspace.hidden = false;
+      document.querySelector('#login-section').hidden = true;
+      message.textContent = 'Signed in.';
+    } catch (error) { token = ''; message.textContent = error.message; }
+  });
+  document.querySelector('#create-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.target;
+    const values = Object.fromEntries(new FormData(form).entries());
+    values.target = Number(values.target);
+    values.enabled = form.elements.enabled.checked;
+    try { await api('/admin/api/achievements', { method: 'POST', body: JSON.stringify(values) }); message.textContent = `${values.id} added.`; form.reset(); await refresh(); }
+    catch (error) { message.textContent = error.message; }
+  });
+</script></body></html>
+

@@ -1,0 +1,34 @@
+{
+  "name": "tiletopia-api",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "online:check": "npm run build && node scripts/check-online-play.mjs",
+    "seed:demo": "npm run build && node scripts/seed-demo.mjs",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "prestart": "npm run build",
+    "start": "node dist/server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@fastify/jwt": "^10.2.2",
+    "dotenv": "^18.0.4",
+    "fastify": "^5.12.5",
+    "pg": "^8.23.0",
+    "sharp": "^0.35.5",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,3220 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Tiletopia API",
+    "version": "1.0.0",
+    "description": "Authentication, game turn, and achievement API. Log in or register to obtain a one-hour bearer token."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Local API (change the port if PORT differs)"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Health"
+    },
+    {
+      "name": "Authentication"
+    },
+    {
+      "name": "Games"
+    },
+    {
+      "name": "Achievements"
+    },
+    {
+      "name": "Gems",
+      "description": "Confirmed account balance and transaction history"
+    },
+    {
+      "name": "Verified AI",
+      "description": "Server-owned AI matches with capped, idempotent Gem settlement for newly created matches"
+    },
+    {
+      "name": "Matchmaking"
+    },
+    {
+      "name": "Online play",
+      "description": "Authoritative casual live PvP, separate from local-game mirrors."
+    }
+  ],
+  "paths": {
+    "/gems/me": {
+      "get": {
+        "tags": ["Gems"],
+        "summary": "Read confirmed Gem wallet",
+        "operationId": "getMyGems",
+        "responses": {
+          "200": {"description": "Confirmed balance and up to 50 newest transactions"},
+          "401": {"description": "Authentication required"}
+        }
+      }
+    },
+    "/ai-games/": {
+      "post": {
+        "tags": ["Verified AI"],
+        "summary": "Start or resume a server-owned AI match",
+        "operationId": "startVerifiedAiMatch",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object", "required": ["requestId", "difficulty"],
+          "properties": {"requestId": {"type": "string", "format": "uuid"}, "difficulty": {"type": "integer", "minimum": 0, "maximum": 2}}
+        }}}},
+        "responses": {"200": {"description": "Private authoritative match view"}, "401": {"description": "Authentication required"}}
+      }
+    },
+    "/ai-games/current": {
+      "get": {"tags": ["Verified AI"], "summary": "Recover the active AI match", "operationId": "getCurrentVerifiedAiMatch",
+        "responses": {"200": {"description": "Active match or null"}, "401": {"description": "Authentication required"}}}
+    },
+    "/ai-games/{matchId}": {
+      "get": {"tags": ["Verified AI"], "summary": "Read one private AI match", "operationId": "getVerifiedAiMatch",
+        "parameters": [{"name": "matchId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
+        "responses": {"200": {"description": "Private authoritative match view"}, "404": {"description": "Match unavailable"}}}
+    },
+    "/ai-games/{matchId}/commands": {
+      "post": {"tags": ["Verified AI"], "summary": "Submit a move, resignation or difficulty change", "operationId": "submitVerifiedAiCommand",
+        "parameters": [{"name": "matchId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
+        "responses": {"200": {"description": "Updated private match view"}, "409": {"description": "Rejected command with current view"}}}
+    },
+    "/auth/me/avatar": {
+      "put": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Upload or replace the signed-in user's avatar",
+        "operationId": "uploadAvatar",
+        "description": "Accepts PNG or JPEG, at most 2 MiB decoded, with each side between 195 and 2048 pixels. Centre-crops and normalizes to a metadata-free 195 x 195 PNG. Requires migration 009_user_avatars.sql.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "contentType",
+                  "data"
+                ],
+                "properties": {
+                  "contentType": {
+                    "type": "string",
+                    "enum": [
+                      "image/png",
+                      "image/jpeg"
+                    ]
+                  },
+                  "data": {
+                    "type": "string",
+                    "format": "byte",
+                    "minLength": 1,
+                    "maxLength": 2796204,
+                    "description": "Standard padded base64 without whitespace or data-URL prefix."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Avatar saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "avatar"
+                  ],
+                  "properties": {
+                    "avatar": {
+                      "type": "object",
+                      "required": [
+                        "url",
+                        "contentType",
+                        "width",
+                        "height",
+                        "updatedAt"
+                      ],
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "example": "/auth/me/avatar",
+                          "description": "Relative API URL; downloading requires a bearer token."
+                        },
+                        "contentType": {
+                          "type": "string",
+                          "enum": [
+                            "image/png"
+                          ]
+                        },
+                        "width": {
+                          "type": "integer",
+                          "enum": [
+                            195
+                          ]
+                        },
+                        "height": {
+                          "type": "integer",
+                          "enum": [
+                            195
+                          ]
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST, INVALID_AVATAR, INVALID_AVATAR_DIMENSIONS, or malformed JSON"
+          },
+          "401": {
+            "description": "UNAUTHORIZED"
+          },
+          "413": {
+            "description": "AVATAR_TOO_LARGE or Fastify FST_ERR_CTP_BODY_TOO_LARGE"
+          },
+          "415": {
+            "description": "Unsupported HTTP Content-Type; send application/json"
+          },
+          "500": {
+            "description": "Storage failure"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Download the signed-in user's avatar",
+        "operationId": "downloadAvatar",
+        "responses": {
+          "200": {
+            "description": "195 x 195 PNG bytes; Cache-Control: private, no-store",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED"
+          },
+          "404": {
+            "description": "AVATAR_NOT_FOUND; show the client default"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Remove the signed-in user's avatar",
+        "operationId": "deleteAvatar",
+        "responses": {
+          "204": {
+            "description": "Avatar removed or already absent; no response body"
+          },
+          "401": {
+            "description": "UNAUTHORIZED"
+          }
+        }
+      }
+    },
+    "/auth/opponents/{userId}/avatar": {
+      "get": {
+        "tags": ["Authentication"],
+        "summary": "Download the avatar of a paired online opponent",
+        "operationId": "downloadOpponentAvatar",
+        "description": "Requires bearer authentication and a current matched lobby or active online game with this opponent. Returns 404 for an unrelated account or an opponent without an avatar. The image is never included in the polled lobby or game JSON.",
+        "parameters": [{ "name": "userId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": {
+          "200": { "description": "195 x 195 PNG bytes; Cache-Control: private, no-store", "content": { "image/png": { "schema": { "type": "string", "format": "binary" } } } },
+          "400": { "description": "INVALID_REQUEST" },
+          "401": { "description": "UNAUTHORIZED" },
+          "404": { "description": "AVATAR_NOT_FOUND or the accounts are not paired" }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Check API health",
+        "operationId": "getHealth",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "API is running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                },
+                "example": {
+                  "status": "ok"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Register a user",
+        "operationId": "registerUser",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              },
+              "example": {
+                "email": "player@example.com",
+                "password": "a-long-test-password",
+                "displayName": "Player"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "User registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "409": {
+            "description": "Email is already registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "EMAIL_IN_USE"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Log in",
+        "operationId": "loginUser",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              },
+              "example": {
+                "email": "test.user@example.com",
+                "password": "TiletopiaTest2026!"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Logged in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "description": "Email or password is incorrect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "INVALID_CREDENTIALS"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/google": {
+      "get": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Start Google sign in",
+        "operationId": "startGoogleOAuth",
+        "security": [],
+        "responses": {
+          "302": {
+            "description": "Redirects to Google authorization"
+          },
+          "503": {
+            "description": "Google OAuth is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/google/callback": {
+      "get": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Complete Google sign in",
+        "operationId": "completeGoogleOAuth",
+        "security": [],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authenticated user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid callback or state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Google authorization failed or email is not verified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Email belongs to an existing account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Google OAuth is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/me": {
+      "delete": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Permanently delete the authenticated account",
+        "operationId": "deleteAccount",
+        "description": "Irrevocably removes the account, OAuth identities, achievement unlocks, and games involving this account (including turns, memberships and embedded state). Requires explicit confirmation. Idempotent with the same valid signed token; deleted accounts cannot use other protected routes.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "confirm"
+                ],
+                "properties": {
+                  "confirm": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Account and related data deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "success"
+                  ],
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Explicit confirmation required"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Update current user username",
+        "operationId": "updateCurrentUser",
+        "description": "Updates the authenticated account username. Names are trimmed, must contain 1–50 characters, and must not match another account's displayName (ignoring case).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "displayName"
+                ],
+                "properties": {
+                  "displayName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 50
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated current user profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST or malformed JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "USERNAME_TAKEN: another account already uses this username (case-insensitive)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Get current user",
+        "operationId": "getCurrentUser",
+        "responses": {
+          "200": {
+            "description": "Current user profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/games": {
+      "get": {
+        "tags": [
+          "Games"
+        ],
+        "summary": "List the caller's games",
+        "operationId": "listGames",
+        "responses": {
+          "200": {
+            "description": "Games the caller belongs to",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Game"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Games"
+        ],
+        "summary": "Create a game",
+        "operationId": "createGame",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateGameRequest"
+              },
+              "example": {
+                "state": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Game created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Game"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/games/{gameId}": {
+      "get": {
+        "tags": [
+          "Games"
+        ],
+        "summary": "Get a game",
+        "description": "The caller must be a member of the game. Inaccessible games return 404.",
+        "operationId": "getGame",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/GameId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Game details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Game"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/GameNotFound"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Games"
+        ],
+        "summary": "Update a game",
+        "operationId": "updateGame",
+        "description": "Only the creator can update a game. expectedVersion prevents overwriting newer changes.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/GameId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateGameRequest"
+              },
+              "example": {
+                "expectedVersion": 1,
+                "state": {
+                  "board": {}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Game updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Game"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Caller is not the creator",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/GameNotFound"
+          },
+          "409": {
+            "description": "Game version is stale",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Games"
+        ],
+        "summary": "Delete a game",
+        "operationId": "deleteGame",
+        "description": "Only the creator can delete a game. Its turns and player memberships are deleted with it.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/GameId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Game deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Caller is not the creator",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/GameNotFound"
+          }
+        }
+      }
+    },
+    "/games/{gameId}/turns": {
+      "post": {
+        "tags": [
+          "Games"
+        ],
+        "summary": "Submit a turn",
+        "description": "The caller's user ID comes from the bearer token. Use a unique turnId for each turn; repeating a successful turnId returns duplicate=true. The current score is a placeholder of 5 points per placement.",
+        "operationId": "submitTurn",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/GameId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitTurnRequest"
+              },
+              "example": {
+                "turnId": "44444444-4444-4444-8444-444444444444",
+                "expectedVersion": 1,
+                "placements": [
+                  {
+                    "tileId": "tile-1",
+                    "x": 0,
+                    "y": 0
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Turn accepted or previously accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitTurnResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Caller is not a game member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/GameNotFound"
+          },
+          "409": {
+            "description": "Expected game version is stale",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/{gameId}/turns/preview": {
+      "post": {
+        "tags": [
+          "Games"
+        ],
+        "summary": "Preview a line's legality and score (proposed)",
+        "operationId": "previewTurn",
+        "x-implementation-status": "proposed",
+        "description": "PROPOSED CONTRACT ONLY; this route is not implemented. Mirrors Polkabow's GameSessionController.pending_score_preview, LineValidator.validate and ScoringCoordinator.preview_line. The authenticated caller must be a game member and the active player awaiting an action. The server resolves tile IDs from that player's held deck and evaluates the entire proposed line against one consistent stored match snapshot and its scoring rules. Request order does not affect the result. No board, deck, score ledger, scored-hand set, history, turn, achievement, or game version is changed; no tiles are drawn and no AI action is triggered. Repeated previews have no side effects and need no turnId. A preview reserves nothing; any later commit must independently revalidate the placements and version. The existing submitTurn route still uses placeholder scoring and does not yet accept rotations, so parity with that route is an implementation prerequisite, not a current guarantee.",
+        "x-polkabow-sources": [
+          "scripts/application/game_session_controller.gd:pending_score_preview",
+          "scripts/domain/placement/line_validator.gd:validate",
+          "scripts/domain/scoring/scoring_coordinator.gd:preview_line",
+          "scripts/domain/scoring/scoring_coordinator.gd:build_events_for_line",
+          "scripts/domain/scoring/hand_multiplier_scorer.gd",
+          "docs/decisions/ADR-012-valid-hand-list.md",
+          "docs/decisions/ADR-013-tile-multipliers.md"
+        ],
+        "x-implementation-prerequisites": [
+          "Port or reuse Polkabow's line validation and scoring rules, including previously scored hands, boundaries and cluster entitlements; do not use the current five-points-per-placement placeholder.",
+          "Establish validated match state containing the board, held decks, caller-to-player mapping, action phase and versioned scoring configuration. Current create/update routes accept arbitrary client state, which is not a trusted rules authority. Missing or invalid state must produce GAME_STATE_UNAVAILABLE, never a fabricated zero score.",
+          "Before enabling server-authoritative gameplay, align commit validation, rotation handling, state ownership and version updates with preview. API gameVersion is not Polkabow's board revision."
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/GameId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewTurnRequest"
+              },
+              "example": {
+                "expectedVersion": 1,
+                "placements": [
+                  {
+                    "tileId": "tile-1",
+                    "x": 5,
+                    "y": 5,
+                    "rotation": 0
+                  },
+                  {
+                    "tileId": "tile-2",
+                    "x": 6,
+                    "y": 5,
+                    "rotation": 0
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Legal line evaluated without committing it. All points are hypothetical increments, not the player's cumulative score. Zero points can be a valid result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewTurnResponse"
+                },
+                "examples": {
+                  "openingPair": {
+                    "summary": "Two Jacks of different face colors with no matching touching edge",
+                    "description": "Assumes an empty board and these tiles in the caller's deck. Pair category 2 plus card values 1 + 1, with card and new-edge factors both 1, gives 4 poker points. No edge or cluster award.",
+                    "value": {
+                      "valid": true,
+                      "gameVersion": 1,
+                      "rulesVersion": "scoring:5",
+                      "score": {
+                        "poker": 4,
+                        "edge": 0,
+                        "cluster": 0,
+                        "total": 4
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/GameNotFound"
+          },
+          "409": {
+            "description": "After authentication and membership checks: reject a stale expectedVersion first, then an ended match, unavailable or invalid match state, unsupported scoring rules, or a caller who is not the active player awaiting an action. Missing games and non-members both receive 404. No state changes occur.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewTurnConflict"
+                },
+                "examples": {
+                  "staleVersion": {
+                    "value": {
+                      "error": "STALE_GAME_STATE"
+                    }
+                  },
+                  "finished": {
+                    "value": {
+                      "error": "MATCH_FINISHED"
+                    }
+                  },
+                  "unavailable": {
+                    "value": {
+                      "error": "GAME_STATE_UNAVAILABLE"
+                    }
+                  },
+                  "unsupportedRules": {
+                    "value": {
+                      "error": "UNSUPPORTED_RULES_VERSION"
+                    }
+                  },
+                  "wrongTurn": {
+                    "value": {
+                      "error": "NOT_PLAYERS_TURN"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Well-formed request fails tile ownership or line legality. No partial score is returned. Unknown, unheld or repeated tile IDs produce TILE_NOT_AVAILABLE. Duplicate target cells produce CELL_OCCUPIED. Bounds, rotation and array-size violations are request validation errors (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewTurnRejection"
+                },
+                "example": {
+                  "error": "INVALID_LINE",
+                  "reason": "NO_REPEATED_RANK",
+                  "cell": {
+                    "x": 5,
+                    "y": 5
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/{gameId}/pass": {
+      "post": {
+        "tags": [
+          "Games"
+        ],
+        "summary": "Pass when no legal move is available",
+        "description": "The current player submits this after determining that no legal move is available. The API records the pass, advances to the other player in a two player game, and returns notification text for the client to display.",
+        "operationId": "passTurn",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/GameId"
+          }
+        ],
+        "x-proposed-human-vs-ai-support": {
+          "status": "proposed; existing request and response schemas still describe the deployed two-account route",
+          "requirements": [
+            "Use a validated human-versus-AI match with the authenticated account mapped to human and an internal AI actor, never a fabricated user account or a caller-supplied actor ID.",
+            "The server must verify that the human has no legal line and cannot perform the full-deck swap that Polkabow's automatic-pass flow prefers when supply permits. Both players lacking legal moves ends the match under existing rules instead of passing.",
+            "Accept the existing turnId/expectedVersion payload, record a zero-point pass atomically, advance to the AI and increment the API version. Deduplicate successful requests before checking version/phase, but always after membership checks.",
+            "Make currentPlayerId nullable for the internal AI turn and add an explicit human/ai active-actor field in a subsequent approved schema revision. The existing non-null UUID response is not sufficient.",
+            "Server-controlled AI turns must use the same legality/scoring rules and their own actor attribution. The current Polkabow client mirrors AI results through PATCH state and must not submit them as authenticated human turns."
+          ]
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PassTurnRequest"
+              },
+              "example": {
+                "turnId": "44444444-4444-4444-8444-444444444444",
+                "expectedVersion": 1
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Turn passed and opponent is now active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PassTurnResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Caller is not a game member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/GameNotFound"
+          },
+          "409": {
+            "description": "Expected game version is stale",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/{gameId}/swaps": {
+      "post": {
+        "tags": [
+          "Games"
+        ],
+        "summary": "Swap held tiles (proposed)",
+        "operationId": "swapTiles",
+        "x-implementation-status": "proposed",
+        "description": "PROPOSED; not implemented. Maps GameSessionController.request_swap and GameSessionState.request_swap. The authenticated human can swap one or more distinct tiles from their own deck instead of placing a line. The pot must supply the complete replacement before returned tiles re-enter it, so a returned tile cannot be immediately redrawn. Swaps award no points and end the turn. Validate ownership, turn phase and supply, then atomically update deck, pot, turn, state and API version once. The server schedules any AI action using its own actor identity; the client cannot claim to be AI. Retry of the same successful turnId and tile set by the same caller in the same game returns the original result with duplicate=true before version/phase checks; changed content returns ACTION_ID_CONFLICT. IDs share the game's turn/pass action namespace.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/GameId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwapTilesRequest"
+              },
+              "example": {
+                "turnId": "55555555-5555-4555-8555-555555555555",
+                "expectedVersion": 4,
+                "tileIds": [
+                  "tile-1",
+                  "tile-2"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Swap accepted, or replay of the original successful result. gameVersion is the version immediately after this swap; subsequent AI actions may advance it further.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwapTilesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/GameNotFound"
+          },
+          "409": {
+            "description": "Stale version, ended match, wrong action phase, unavailable validated state, or reuse of an action ID with different content. No mutation on failure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameActionConflict"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Tile not held or replacement supply insufficient.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwapTilesRejection"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/{gameId}/resign": {
+      "post": {
+        "tags": [
+          "Games"
+        ],
+        "summary": "Resign a human-versus-AI match (proposed)",
+        "operationId": "resignGame",
+        "x-implementation-status": "proposed",
+        "description": "PROPOSED GAMEPLAY DECISION FOR REVIEW; Polkabow currently has no resignation rule or UI. The authenticated human member may concede an active human-versus-AI game, including during the AI turn. Proposed outcome: the AI wins regardless of score; existing scores are retained and no scoring or achievement bonus is granted. Atomically cancel pending AI work, mark the game completed with endReason=resigned and winner=ai, clear the active player, set completed_at and increment the API version once. A later AI result must not commit after resignation. This is not DELETE /games/{gameId}: game history is retained. Replay of the same successful actionId for the same caller/game returns the original result with duplicate=true before stale-version/finished checks; different content returns ACTION_ID_CONFLICT. Authentication and membership are always checked first.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/GameId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResignGameRequest"
+              },
+              "example": {
+                "actionId": "66666666-6666-4666-8666-666666666666",
+                "expectedVersion": 4
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resignation recorded, or original successful result replayed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResignGameResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/GameNotFound"
+          },
+          "409": {
+            "description": "Stale version, ended match, wrong action phase, unavailable validated state, or reuse of an action ID with different content. No mutation on failure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameActionConflict"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/progression/me": {
+      "get": {
+        "tags": ["Progression"],
+        "summary": "Read the caller's Table Level and Online Tier",
+        "description": "Only completed server-verified online matches award 100 XP to each player. Rating uses Glicko-2; level and rating are independent.",
+        "responses": {
+          "200": {
+            "description": "Current player progression",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["experience", "level", "levelStartExperience", "nextLevelExperience", "onlineTier", "ratedMatches"],
+                  "properties": {
+                    "experience": {"type": "integer", "minimum": 0},
+                    "level": {"type": "integer", "minimum": 1},
+                    "levelStartExperience": {"type": "integer", "minimum": 0},
+                    "nextLevelExperience": {"type": "integer", "minimum": 100},
+                    "onlineTier": {"type": "string", "enum": ["Provisional", "Novice", "Contender", "Expert", "Master"]},
+                    "ratedMatches": {"type": "integer", "minimum": 0}
+                  }
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"description": "Account not found"}
+        }
+      }
+    },
+    "/achievements": {
+      "get": {
+        "tags": [
+          "Achievements"
+        ],
+        "summary": "List achievements and the caller's unlock state",
+        "operationId": "listAchievements",
+        "responses": {
+          "200": {
+            "description": "Achievement catalog with per-user unlock state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Achievement"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/achievements/check-in": {
+      "post": {
+        "tags": ["Achievements"],
+        "summary": "Record an authenticated UTC visit day",
+        "description": "Uses the database UTC date and counts an account at most once per day. Unlocks registered active-day and consecutive-day achievements. Safe to retry.",
+        "operationId": "checkInAchievements",
+        "responses": {
+          "200": {
+            "description": "Recorded visit counts and newly unlocked achievements",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["day", "totalDays", "consecutiveDays", "unlocked", "unlockedDetails"],
+                  "properties": {
+                    "day": { "type": "string", "format": "date" },
+                    "totalDays": { "type": "integer" },
+                    "consecutiveDays": { "type": "integer" },
+                    "unlocked": { "type": "array", "items": { "type": "string" } },
+                    "unlockedDetails": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["id", "name", "description"],
+                        "properties": {
+                          "id": { "type": "string" },
+                          "name": { "type": "string" },
+                          "description": { "type": "string" },
+                          "badgeKey": { "type": "string", "nullable": true }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/achievements/unlocks": {
+      "post": {
+        "tags": [
+          "Achievements"
+        ],
+        "summary": "Unlock achievements for the caller",
+        "description": "Known achievement IDs are permanently unlocked for the authenticated account. Repeated IDs are idempotent. The current API trusts the authenticated client to report the gameplay trigger.",
+        "operationId": "unlockAchievements",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnlockAchievementsRequest"
+              },
+              "example": {
+                "achievementIds": [
+                  "first_hand",
+                  "straight"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "New and previously unlocked achievement IDs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnlockAchievementsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/matchmaking/tickets": {
+      "post": {
+        "tags": [
+          "Matchmaking"
+        ],
+        "summary": "Join or recover an unranked online lobby search",
+        "operationId": "joinMatchmaking",
+        "description": "Use a fresh requestId for an explicit new search and reuse it after a lost response. One active ticket per account. Replaying a cancelled or expired request never reopens it. Presence expires after 30 seconds without a successful join or heartbeat.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "requestId",
+                  "rulesVersion"
+                ],
+                "properties": {
+                  "requestId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "rulesVersion": {
+                    "type": "string",
+                    "enum": [
+                      "pokabow-v1"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authoritative ticket status. A matched lobby is not yet a playable game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchmakingTicket"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unsupported rules version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired or deleted-account credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/matchmaking/tickets/current": {
+      "get": {
+        "tags": [
+          "Matchmaking"
+        ],
+        "summary": "Recover the callerâ€™s active ticket without renewing it",
+        "operationId": "currentMatchmaking",
+        "responses": {
+          "200": {
+            "description": "Active ticket, or null when absent or expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ticket"
+                  ],
+                  "properties": {
+                    "ticket": {
+                      "nullable": true,
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/MatchmakingTicket"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired or deleted-account credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/matchmaking/tickets/{ticketId}/heartbeat": {
+      "post": {
+        "tags": [
+          "Matchmaking"
+        ],
+        "summary": "Renew searching or matched presence",
+        "operationId": "heartbeatMatchmaking",
+        "parameters": [
+          {
+            "name": "ticketId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative ticket status. A matched lobby is not yet a playable game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchmakingTicket"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unsupported rules version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired or deleted-account credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Ticket not found or belongs to another account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/matchmaking/tickets/{ticketId}": {
+      "delete": {
+        "tags": [
+          "Matchmaking"
+        ],
+        "summary": "Cancel a search or leave a matched lobby",
+        "operationId": "cancelMatchmaking",
+        "parameters": [
+          {
+            "name": "ticketId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative ticket status. A matched lobby is not yet a playable game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchmakingTicket"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unsupported rules version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired or deleted-account credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Ticket not found or belongs to another account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/matchmaking/requests/{requestId}": {
+      "delete": {
+        "tags": [
+          "Matchmaking"
+        ],
+        "summary": "Cancel even when the join response was lost",
+        "operationId": "cancelMatchmakingRequest",
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authoritative ticket status. A matched lobby is not yet a playable game.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchmakingTicket"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or unsupported rules version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, expired or deleted-account credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/matchmaking/tickets/{ticketId}/ready": {
+      "post": {
+        "tags": [
+          "Online play"
+        ],
+        "summary": "Ready up; create exactly one game when both players are ready",
+        "parameters": [
+          {
+            "name": "ticketId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ticket including readiness and lobby.matchId once playing"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not found for this account"
+          },
+          "409": {
+            "description": "Lobby unavailable or rules engine not configured"
+          }
+        }
+      }
+    },
+    "/online-games/current": {
+      "get": {
+        "tags": [
+          "Online play"
+        ],
+        "summary": "Recover the caller's active match",
+        "responses": {
+          "200": {
+            "description": "Current private state or null",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "match": {
+                      "type": "object",
+                      "description": "Caller-private projection: public board, own hand, turn, ledger and result; no bag, seed or opponent hand.",
+                      "required": [
+                        "matchId",
+                        "version",
+                        "status",
+                        "serverTime",
+                        "board",
+                        "hand",
+                        "seat"
+                      ],
+                      "properties": {
+                        "matchId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "version": {
+                          "type": "integer"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "active",
+                            "completed"
+                          ]
+                        },
+                        "serverTime": {
+                          "type": "number"
+                        },
+                        "deadline": {
+                          "type": "number",
+                          "nullable": true,
+                          "description": "Always null; retained for older clients. Turns have no move deadline."
+                        },
+                        "board": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "hand": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "seat": {
+                          "type": "string",
+                          "enum": [
+                            "human",
+                            "ai"
+                          ]
+                        },
+                        "opponent": {
+                          "type": "object"
+                        },
+                        "remainingTiles": {
+                          "type": "integer"
+                        },
+                        "opponentTileCount": {
+                          "type": "integer"
+                        },
+                        "turn": {
+                          "type": "object"
+                        },
+                        "ledger": {
+                          "type": "object"
+                        },
+                        "result": {
+                          "type": "object"
+                        },
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          }
+        }
+      }
+    },
+    "/online-games/{matchId}": {
+      "get": {
+        "tags": [
+          "Online play"
+        ],
+        "summary": "Read private state and renew presence",
+        "parameters": [
+          {
+            "name": "matchId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Private state after resolving elapsed turns",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnlinePrivateState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not found for this account"
+          }
+        }
+      }
+    },
+    "/online-games/{matchId}/commands": {
+      "post": {
+        "tags": [
+          "Online play"
+        ],
+        "summary": "Submit an idempotent place, swap or resign command",
+        "parameters": [
+          {
+            "name": "matchId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "commandId",
+                      "expectedVersion",
+                      "action",
+                      "placements"
+                    ],
+                    "properties": {
+                      "commandId": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "expectedVersion": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "place"
+                        ]
+                      },
+                      "placements": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 10,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "tileId",
+                            "x",
+                            "y",
+                            "rotation"
+                          ],
+                          "properties": {
+                            "tileId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            },
+                            "x": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 11
+                            },
+                            "y": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 11
+                            },
+                            "rotation": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 3
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "commandId",
+                      "expectedVersion",
+                      "action",
+                      "tileIds"
+                    ],
+                    "properties": {
+                      "commandId": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "expectedVersion": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "swap"
+                        ]
+                      },
+                      "tileIds": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 10,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "commandId",
+                      "expectedVersion",
+                      "action"
+                    ],
+                    "properties": {
+                      "commandId": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "expectedVersion": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "resign"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted command or successful retry; latest private state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnlinePrivateState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not found for this account"
+          },
+          "409": {
+            "description": "Rejected command with error and fresh private state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnlinePrivateState"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/achievements/progress": {
+      "post": {
+        "tags": [
+          "Achievements"
+        ],
+        "summary": "Record committed achievement progress events",
+        "description": "Stable event IDs are deduplicated per account. The client-reported gameplay evidence is not server verified.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "events"
+                ],
+                "properties": {
+                  "events": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "eventId",
+                        "metric"
+                      ],
+                      "properties": {
+                        "eventId": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "metric": {
+                          "type": "string",
+                          "enum": [
+                            "two_pair_scored",
+                            "perfect_match_scored"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted new event IDs, newly unlocked IDs, and counts"
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/admin/api/achievements": {
+      "get": {
+        "tags": [
+          "Achievements"
+        ],
+        "summary": "List catalogue definitions for administrators",
+        "responses": {
+          "200": {
+            "description": "All definitions"
+          },
+          "403": {
+            "description": "Admin account required"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Achievements"
+        ],
+        "summary": "Create an achievement using a registered metric",
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "403": {
+            "description": "Admin account required"
+          }
+        }
+      }
+    },
+    "/admin/api/achievements/{id}": {
+      "patch": {
+        "tags": [
+          "Achievements"
+        ],
+        "summary": "Edit achievement presentation details",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated"
+          },
+          "403": {
+            "description": "Admin account required"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Token returned by /auth/register or /auth/login"
+      }
+    },
+    "parameters": {
+      "GameId": {
+        "name": "gameId",
+        "in": "path",
+        "required": true,
+        "description": "Game UUID",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "responses": {
+      "InvalidRequest": {
+        "description": "Request validation failed",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ValidationError"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Missing or invalid bearer token",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "UNAUTHORIZED"
+            }
+          }
+        }
+      },
+      "GameNotFound": {
+        "description": "Game does not exist or is not accessible",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "GAME_NOT_FOUND"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Health": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok"
+            ]
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "displayName"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "nullable": true
+          },
+          "displayName": {
+            "type": "string"
+          }
+        }
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "required": [
+          "email",
+          "password",
+          "displayName"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 254,
+            "description": "Stored in lowercase"
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "minLength": 12,
+            "maxLength": 128
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 254
+          },
+          "password": {
+            "type": "string",
+            "format": "password"
+          }
+        }
+      },
+      "AuthResponse": {
+        "type": "object",
+        "required": [
+          "token",
+          "user"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "JWT valid for one hour"
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          }
+        }
+      },
+      "CreateGameRequest": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "object",
+            "description": "Initial game state; defaults to an empty object"
+          }
+        }
+      },
+      "UpdateGameRequest": {
+        "type": "object",
+        "required": [
+          "expectedVersion"
+        ],
+        "minProperties": 2,
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "state": {
+            "type": "object"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "completed"
+            ]
+          }
+        }
+      },
+      "Game": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "current_player_id",
+          "version",
+          "state",
+          "created_at",
+          "completed_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "current_player_id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "state": {
+            "description": "Game state JSON stored in the database"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "Achievement": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "category",
+          "unlocked",
+          "unlocked_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "unlocked": {
+            "type": "boolean"
+          },
+          "unlocked_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "metric": {
+            "type": "string",
+            "nullable": true
+          },
+          "target": {
+            "type": "integer"
+          },
+          "progress": {
+            "type": "integer"
+          },
+          "badgeKey": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "UnlockAchievementsRequest": {
+        "type": "object",
+        "required": [
+          "achievementIds"
+        ],
+        "properties": {
+          "achievementIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 5,
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            }
+          }
+        }
+      },
+      "UnlockAchievementsResponse": {
+        "type": "object",
+        "required": [
+          "unlocked",
+          "alreadyUnlocked"
+        ],
+        "properties": {
+          "unlocked": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "alreadyUnlocked": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "TilePlacement": {
+        "type": "object",
+        "required": [
+          "tileId",
+          "x",
+          "y"
+        ],
+        "properties": {
+          "tileId": {
+            "type": "string"
+          },
+          "x": {
+            "type": "integer"
+          },
+          "y": {
+            "type": "integer"
+          }
+        }
+      },
+      "SubmitTurnRequest": {
+        "type": "object",
+        "required": [
+          "turnId",
+          "expectedVersion",
+          "placements"
+        ],
+        "properties": {
+          "turnId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "placements": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/TilePlacement"
+            }
+          }
+        }
+      },
+      "SubmitTurnResponse": {
+        "type": "object",
+        "required": [
+          "accepted",
+          "duplicate",
+          "score",
+          "gameVersion"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "duplicate": {
+            "type": "boolean"
+          },
+          "score": {
+            "type": "integer"
+          },
+          "gameVersion": {
+            "type": "integer"
+          }
+        }
+      },
+      "PreviewTurnRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion",
+          "placements"
+        ],
+        "description": "Only placement intent is accepted; board, tile faces/edges/suits, score, rules and player identity come from validated stored match state and authentication. The merged line must be gapless in one row or column, with two to five total cells including existing tiles. The opening requires at least two new tiles and must cover (5,5), (6,5), (5,6) or (6,6). Later moves must touch a committed tile orthogonally; one new tile can extend an existing hand. All affected runs must satisfy Polkabow's current hand legality, including perpendicular runs, and no run may exceed five cells. Matching edge colors are not required for legality.",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Required stored API game version. A mismatch returns 409 STALE_GAME_STATE. This is not the board revision."
+          },
+          "placements": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 5,
+            "items": {
+              "$ref": "#/components/schemas/PreviewTilePlacement"
+            }
+          }
+        }
+      },
+      "PreviewTilePlacement": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tileId",
+          "x",
+          "y",
+          "rotation"
+        ],
+        "properties": {
+          "tileId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Unique tile ID held in the caller's deck; must appear only once in the request."
+          },
+          "x": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 11,
+            "description": "Zero-based column from the left."
+          },
+          "y": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 11,
+            "description": "Zero-based row from the top."
+          },
+          "rotation": {
+            "type": "integer",
+            "enum": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "description": "Absolute clockwise quarter-turn index from the tile's unrotated edges: 0, 90, 180 or 270 degrees respectively. Not a rotation delta."
+          }
+        }
+      },
+      "PreviewTurnResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "valid",
+          "gameVersion",
+          "rulesVersion",
+          "score"
+        ],
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "gameVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Unchanged API game version of the snapshot evaluated; equals expectedVersion on success."
+          },
+          "rulesVersion": {
+            "type": "string",
+            "minLength": 1,
+            "description": "ScoringRules.version_key() for the stored match rules used in this preview.",
+            "example": "scoring:5"
+          },
+          "score": {
+            "$ref": "#/components/schemas/PreviewScoreBreakdown"
+          }
+        }
+      },
+      "PreviewScoreBreakdown": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "poker",
+          "edge",
+          "cluster",
+          "total"
+        ],
+        "description": "Sums of hypothetical score events from ScoringCoordinator.build_events_for_line, respecting previously scored hands and cluster entitlements. total must equal poker + edge + cluster. No points are awarded or persisted.",
+        "properties": {
+          "poker": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Sum of new hand awards, including the approved ADR-013 formula: (category points + card values) multiplied by the card factor and new-edge factor. Uses the stored match's scoring configuration."
+          },
+          "edge": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Separate matching-edge awards: one point per newly created matching boundary, counted once."
+          },
+          "cluster": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Incremental color-cluster entitlement awards under the stored match rules; excludes bonuses already earned."
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total additional points this line would earn; not the player's accumulated score."
+          }
+        }
+      },
+      "PreviewTurnConflict": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "enum": [
+              "STALE_GAME_STATE",
+              "MATCH_FINISHED",
+              "GAME_STATE_UNAVAILABLE",
+              "UNSUPPORTED_RULES_VERSION",
+              "NOT_PLAYERS_TURN"
+            ]
+          }
+        }
+      },
+      "PreviewTurnRejection": {
+        "type": "object",
+        "required": [
+          "error",
+          "reason",
+          "cell"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "enum": [
+              "INVALID_LINE"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "TILE_NOT_AVAILABLE",
+              "CELL_OCCUPIED",
+              "MIXED_ORIENTATION",
+              "LINE_GAP",
+              "OPENING_CELL_REQUIRED",
+              "NOT_CONNECTED",
+              "LONE_TILE",
+              "HAND_TOO_LONG",
+              "NO_REPEATED_RANK"
+            ],
+            "description": "Polkabow PlacementEnums rejection name. NO_REPEATED_RANK is the existing legacy name for any unranked/illegal hand, including an invalid straight or perpendicular run; it does not prohibit valid straights."
+          },
+          "cell": {
+            "type": "object",
+            "required": [
+              "x",
+              "y"
+            ],
+            "description": "The cell associated with the rejected placement, or the first staged cell when the rejection concerns the whole line.",
+            "properties": {
+              "x": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 11
+              },
+              "y": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 11
+              }
+            }
+          }
+        }
+      },
+      "SwapTilesRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "turnId",
+          "expectedVersion",
+          "tileIds"
+        ],
+        "properties": {
+          "turnId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "tileIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 6,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Distinct held tile IDs; current default deck size is six. Replacement draw and return follow Polkabow's stored tile-source state."
+          }
+        }
+      },
+      "SwapTilesResponse": {
+        "type": "object",
+        "required": [
+          "accepted",
+          "duplicate",
+          "swappedCount",
+          "gameVersion"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "duplicate": {
+            "type": "boolean"
+          },
+          "swappedCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6
+          },
+          "gameVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "SwapTilesRejection": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "enum": [
+              "TILE_NOT_AVAILABLE",
+              "INSUFFICIENT_TILE_SUPPLY"
+            ]
+          }
+        }
+      },
+      "ResignGameRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "actionId",
+          "expectedVersion"
+        ],
+        "properties": {
+          "actionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "ResignGameResponse": {
+        "type": "object",
+        "required": [
+          "accepted",
+          "duplicate",
+          "status",
+          "endReason",
+          "winner",
+          "gameVersion",
+          "completedAt"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "duplicate": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed"
+            ]
+          },
+          "endReason": {
+            "type": "string",
+            "enum": [
+              "resigned"
+            ]
+          },
+          "winner": {
+            "type": "string",
+            "enum": [
+              "ai"
+            ]
+          },
+          "gameVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "GameActionConflict": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "enum": [
+              "STALE_GAME_STATE",
+              "MATCH_FINISHED",
+              "NOT_PLAYERS_TURN",
+              "GAME_STATE_UNAVAILABLE",
+              "ACTION_ID_CONFLICT"
+            ]
+          }
+        }
+      },
+      "PassTurnRequest": {
+        "type": "object",
+        "required": [
+          "turnId",
+          "expectedVersion"
+        ],
+        "properties": {
+          "turnId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "PassTurnResponse": {
+        "type": "object",
+        "required": [
+          "accepted",
+          "duplicate",
+          "passed",
+          "notification",
+          "gameVersion"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "duplicate": {
+            "type": "boolean"
+          },
+          "passed": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "notification": {
+            "type": "string",
+            "example": "No valid move available, now opponents turn"
+          },
+          "currentPlayerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "gameVersion": {
+            "type": "integer"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "ValidationError": {
+        "type": "object",
+        "required": [
+          "error",
+          "details"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "enum": [
+              "INVALID_REQUEST"
+            ]
+          },
+          "details": {
+            "type": "object",
+            "required": [
+              "formErrors",
+              "fieldErrors"
+            ],
+            "properties": {
+              "formErrors": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "fieldErrors": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "MatchmakingTicket": {
+        "type": "object",
+        "required": [
+          "ticketId",
+          "status",
+          "rulesVersion",
+          "expiresAt",
+          "pollAfterMs",
+          "lobby"
+        ],
+        "properties": {
+          "ticketId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "searching",
+              "matched",
+              "cancelled",
+              "expired",
+              "opponent_left"
+            ]
+          },
+          "rulesVersion": {
+            "type": "string",
+            "enum": [
+              "pokabow-v1"
+            ]
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "pollAfterMs": {
+            "type": "integer",
+            "example": 2000
+          },
+          "lobby": {
+            "type": "object",
+            "nullable": true,
+            "required": [
+              "id",
+              "opponent",
+              "playable"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "playable": {
+                "type": "boolean"
+              },
+              "opponent": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "displayName",
+                  "onlineTier"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "displayName": {
+                    "type": "string"
+                  },
+                  "onlineTier": {
+                    "type": "string",
+                    "enum": ["Provisional", "Novice", "Contender", "Expert", "Master"]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "OnlinePrivateState": {
+        "type": "object",
+        "description": "Caller-private projection: public board, own hand, turn, ledger and result; no bag, seed or opponent hand.",
+        "required": [
+          "matchId",
+          "version",
+          "status",
+          "serverTime",
+          "board",
+          "hand",
+          "seat"
+        ],
+        "properties": {
+          "matchId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "completed"
+            ]
+          },
+          "serverTime": {
+            "type": "number"
+          },
+          "deadline": {
+            "type": "number",
+            "nullable": true,
+            "description": "Always null; retained for older clients. Turns have no move deadline."
+          },
+          "board": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "hand": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "seat": {
+            "type": "string",
+            "enum": [
+              "human",
+              "ai"
+            ]
+          },
+          "opponent": {
+            "type": "object"
+          },
+          "remainingTiles": {
+            "type": "integer"
+          },
+          "opponentTileCount": {
+            "type": "integer"
+          },
+          "turn": {
+            "type": "object"
+          },
+          "ledger": {
+            "type": "object"
+          },
+          "result": {
+            "type": "object"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
