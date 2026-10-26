@@ -3,7 +3,7 @@
 ## Setup
 
 1. Install dependencies with `npm install`.
-2. Create a PostgreSQL database and apply `migrations/001_initial.sql`, then `migrations/002_user_auth.sql`, `migrations/004_oauth_accounts.sql`, `migrations/005_game_crud.sql`, `migrations/006_achievements.sql`, `migrations/007_matchmaking.sql`, `migrations/008_online_play.sql`, `migrations/009_user_avatars.sql`, `migrations/010_achievement_progress.sql`, `migrations/011_engagement_achievements.sql`, `migrations/012_player_progression.sql`, `migrations/013_gem_wallet.sql`, `migrations/014_verified_ai_matches.sql`, `migrations/015_verified_ai_gems.sql`, `migrations/016_remove_turn_deadlines.sql`, and `migrations/017_rewarded_ad_gems.sql` in order. Existing databases should apply any missing migrations in that order. For a development or test database, optionally apply `migrations/003_test_user.sql` after 002.
+2. Create a PostgreSQL database and apply the numbered SQL files in `migrations/` in order through `019_ai_rivals.sql` (omit optional `003_test_user.sql` outside development). Existing databases should apply missing migrations in order.
 3. Set `DATABASE_URL` and `JWT_SECRET` in `.env`. Use a unique random JWT secret of at least 32 bytes. To enable Google sign in, configure a Google OAuth web client and set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` (the exact registered callback URL). See `.env.example`.
 4. Run `npm run start`. The start script builds the TypeScript code first.
 
@@ -88,13 +88,15 @@ session from `POST /gems/rewarded-ad/session` and displays availability from
 `GET /gems/rewarded-ad/status`. The server grants at most once per account per
 rolling 24 hours. An ad dismissal or unverified client callback grants nothing.
 
-`POST /ai-games/` with `{ "requestId": "<uuid>", "difficulty": 0|1|2 }`
-starts or resumes a server-owned AI match. `GET /ai-games/current` and
-`GET /ai-games/:matchId` restore its private player view. Submit `place`,
-`swap`, `resign`, or `difficulty` commands to
+`GET /ai-rivals/` returns the enabled database roster as `{ rivals: [{ id, displayName, avatarKey, difficulty }] }`. The 15 seeded IDs and avatar keys correspond to the bundled cartoon portraits. `POST /ai-games/` with `{ "requestId": "<uuid>", "difficulty": 0|1|2, "rivalId": "rival_01" }`
+starts a distinct server-owned AI match. Repeating the same `requestId` returns
+that match for safe retry. `GET /ai-games/active` lists every resumable AI match;
+`GET /ai-games/current` returns the newest active match and
+`GET /ai-games/:matchId` restores a specific private player view. Submit `place`,
+`swap`, or `resign` commands to
 `POST /ai-games/:matchId/commands` with a UUID `commandId` and
-`expectedVersion`. The server creates the seed, evaluates the human move,
-chooses the AI move and preserves the player's turn until a legal action. Apply migrations 014 through 016
+`expectedVersion`. The server validates that the selected rival is enabled and belongs to the requested difficulty. It snapshots the name and avatar key on the match; changing the catalogue later does not rename existing matches. A missing `rivalId` selects a random enabled rival in that tier for older clients. Difficulty commands on roster matches return `RIVAL_DIFFICULTY_FIXED`; legacy matches retain their existing behavior. The server creates the seed, evaluates the human move,
+chooses the AI move and preserves the player's turn until a legal action. Apply migrations 014 through 020
 before enabling it.
 
 The original user rows have no email or password after migration. They cannot log in until credentials are assigned through a separate account recovery or migration process.

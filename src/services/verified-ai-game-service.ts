@@ -7,7 +7,8 @@ import { recordPendingVerifiedAiGems, settleVerifiedAiGems } from "./gem-wallet.
 
 type MatchRow = { id: string; user_id: string; state: RulesState; version: number; status: string;
   difficulty: number; reward_difficulty: number; deadline_at: Date | null;
-  gem_eligible: boolean; gem_policy_version: string };
+  gem_eligible: boolean; gem_policy_version: string; rival_id: string | null;
+  rival_name: string | null; rival_avatar_key: string | null };
 export type AiCommand = { commandId: string; expectedVersion: number; action: "place" | "swap" | "resign" | "difficulty";
   placements?: { tileId: string; x: number; y: number; rotation: number }[]; tileIds?: string[]; difficulty?: number };
 
@@ -34,7 +35,8 @@ export function createVerifiedAiGameService(pool: Pick<Pool, "connect"> = db, ru
     return {
       matchId: match.id, version: match.version, status: match.status,
       serverTime: Date.now() / 1000, deadline: null,
-      opponent: { id: "ai", displayName: "AI Rival", connected: true },
+      opponent: { id: match.rival_id ?? "ai", displayName: match.rival_name ?? "AI Rival",
+        avatarKey: match.rival_avatar_key, connected: true },
       difficulty: match.difficulty, rewardDifficulty: match.reward_difficulty,
       ...match.state.views.human,
       gemSettlementStatus: match.status === "completed" ?
@@ -83,22 +85,30 @@ export function createVerifiedAiGameService(pool: Pick<Pool, "connect"> = db, ru
     }
     await client.query("RELEASE SAVEPOINT verified_ai_gem_credit");
   }
-  async function create(userId: string, requestId: string, difficulty: number) {
+  async function create(userId: string, requestId: string, difficulty: number, rivalId?: string) {
     return transaction(async client => {
       await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [userId]);
       const existing = (await client.query<MatchRow>(`SELECT * FROM verified_ai_matches
-        WHERE user_id = $1 AND (id = $2 OR status = 'active') ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+        WHERE user_id = $1 AND id = $2 LIMIT 1 FOR UPDATE`,
       [userId, requestId])).rows[0];
       if (existing) {
         await attemptGemSettlement(client, existing);
         return response(client, existing);
       }
+      const rivals = await client.query<{ id: string; display_name: string; avatar_key: string }>(
+        `SELECT id, display_name, avatar_key FROM ai_rivals
+          WHERE enabled = TRUE AND difficulty = $1 AND ($2::text IS NULL OR id = $2)
+          ORDER BY random() LIMIT 1`, [difficulty, rivalId ?? null]);
+      const rival = rivals.rows[0];
+      if (!rival) throw new VerifiedAiError("RIVAL_UNAVAILABLE", 409);
       const created = await rules({ action: "create", matchId: requestId, seed: randomInt(1, 2147483647) });
       if ("error" in created) throw new Error(created.error);
       const inserted = await client.query<MatchRow>(`INSERT INTO verified_ai_matches
-        (id, user_id, state, difficulty, reward_difficulty, gem_eligible)
-        VALUES ($1,$2,$3,$4,$4,TRUE) RETURNING *`,
-      [requestId, userId, JSON.stringify(created), difficulty]);
+        (id, user_id, state, difficulty, reward_difficulty, gem_eligible,
+          rival_id, rival_name, rival_avatar_key)
+        VALUES ($1,$2,$3,$4,$4,TRUE,$5,$6,$7) RETURNING *`,
+      [requestId, userId, JSON.stringify(created), difficulty,
+        rival.id, rival.display_name, rival.avatar_key]);
       return response(client, inserted.rows[0]);
     });
   }
@@ -125,6 +135,7 @@ export function createVerifiedAiGameService(pool: Pick<Pool, "connect"> = db, ru
       if (command.expectedVersion !== match.version) return response(client, match, "VERSION_CONFLICT");
       let state = match.state;
       if (command.action === "difficulty") {
+        if (match.rival_id) return response(client, match, "RIVAL_DIFFICULTY_FIXED");
         match.difficulty = command.difficulty!;
         match.reward_difficulty = Math.min(match.reward_difficulty, match.difficulty);
       } else {
@@ -140,7 +151,14 @@ export function createVerifiedAiGameService(pool: Pick<Pool, "connect"> = db, ru
       return response(client, match);
     });
   }
-  return { create, current: (userId: string) => access(userId, null),
+  async function active(userId: string) {
+    return transaction(async client => {
+      const matches = (await client.query<MatchRow>(`SELECT * FROM verified_ai_matches
+        WHERE user_id = $1 AND status = 'active' ORDER BY created_at DESC`, [userId])).rows;
+      return Promise.all(matches.map(match => response(client, match)));
+    });
+  }
+  return { create, active, current: (userId: string) => access(userId, null),
     get: (userId: string, id: string) => access(userId, id),
     command: (userId: string, id: string, command: AiCommand) => access(userId, id, command) };
 }

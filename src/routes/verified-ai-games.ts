@@ -18,10 +18,17 @@ export async function verifiedAiGameRoutes(app: FastifyInstance) {
   app.addHook("onRequest", authenticate);
   app.addHook("onSend", async (_request, reply) => { reply.header("Cache-Control", "no-store"); });
   app.get("/current", async request => ({ match: await verifiedAiGameService.current(request.user.sub) }));
+  app.get("/active", async request => ({ matches: await verifiedAiGameService.active(request.user.sub) }));
   app.post("/", async (request, reply) => {
-    const parsed = z.object({ requestId: id, difficulty: z.number().int().min(0).max(2) }).strict().safeParse(request.body);
+    const parsed = z.object({ requestId: id, difficulty: z.number().int().min(0).max(2),
+      rivalId: z.string().regex(/^rival_(0[1-9]|1[0-5])$/).optional() }).strict().safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "INVALID_REQUEST" });
-    return verifiedAiGameService.create(request.user.sub, parsed.data.requestId, parsed.data.difficulty);
+    try { return await verifiedAiGameService.create(request.user.sub, parsed.data.requestId,
+      parsed.data.difficulty, parsed.data.rivalId); }
+    catch (error) {
+      if (error instanceof VerifiedAiError) return reply.code(error.status).send({ error: error.code });
+      throw error;
+    }
   });
   app.get("/:matchId", async (request, reply) => {
     const parsed = z.object({ matchId: id }).safeParse(request.params);

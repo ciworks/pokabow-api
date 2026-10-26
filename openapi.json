@@ -46,6 +46,15 @@
     }
   ],
   "paths": {
+    "/ai-rivals/": {
+      "get": {
+        "tags": ["Verified AI"],
+        "summary": "List enabled named AI rivals and their fixed difficulty tiers",
+        "operationId": "listAiRivals",
+        "security": [],
+        "responses": {"200": {"description": "Database roster with id, displayName, avatarKey and difficulty"}}
+      }
+    },
     "/gems/me": {
       "get": {
         "tags": ["Gems"],
@@ -85,18 +94,22 @@
     "/ai-games/": {
       "post": {
         "tags": ["Verified AI"],
-        "summary": "Start or resume a server-owned AI match",
+        "summary": "Start a distinct server-owned AI match; retrying the same request ID returns that match",
         "operationId": "startVerifiedAiMatch",
         "requestBody": {"required": true, "content": {"application/json": {"schema": {
           "type": "object", "required": ["requestId", "difficulty"],
-          "properties": {"requestId": {"type": "string", "format": "uuid"}, "difficulty": {"type": "integer", "minimum": 0, "maximum": 2}}
+          "properties": {"requestId": {"type": "string", "format": "uuid"}, "difficulty": {"type": "integer", "minimum": 0, "maximum": 2}, "rivalId": {"type": "string", "pattern": "^rival_(0[1-9]|1[0-5])$"}}
         }}}},
         "responses": {"200": {"description": "Private authoritative match view"}, "401": {"description": "Authentication required"}}
       }
     },
     "/ai-games/current": {
-      "get": {"tags": ["Verified AI"], "summary": "Recover the active AI match", "operationId": "getCurrentVerifiedAiMatch",
+      "get": {"tags": ["Verified AI"], "summary": "Recover the newest active AI match", "operationId": "getCurrentVerifiedAiMatch",
         "responses": {"200": {"description": "Active match or null"}, "401": {"description": "Authentication required"}}}
+    },
+    "/ai-games/active": {
+      "get": {"tags": ["Verified AI"], "summary": "List all resumable AI matches", "operationId": "listActiveVerifiedAiMatches",
+        "responses": {"200": {"description": "Private active match views"}, "401": {"description": "Authentication required"}}}
     },
     "/ai-games/{matchId}": {
       "get": {"tags": ["Verified AI"], "summary": "Read one private AI match", "operationId": "getVerifiedAiMatch",
@@ -104,7 +117,7 @@
         "responses": {"200": {"description": "Private authoritative match view"}, "404": {"description": "Match unavailable"}}}
     },
     "/ai-games/{matchId}/commands": {
-      "post": {"tags": ["Verified AI"], "summary": "Submit a move, resignation or difficulty change", "operationId": "submitVerifiedAiCommand",
+      "post": {"tags": ["Verified AI"], "summary": "Submit a move or resignation; difficulty changes remain available only on legacy matches", "operationId": "submitVerifiedAiCommand",
         "parameters": [{"name": "matchId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
         "responses": {"200": {"description": "Updated private match view"}, "409": {"description": "Rejected command with current view"}}}
     },
