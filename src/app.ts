@@ -12,6 +12,7 @@ import { onlineGameRoutes } from "./routes/online-games.js";
 import { progressionRoutes } from "./routes/progression.js";
 import { gemRoutes } from "./routes/gems.js";
 import { verifiedAiGameRoutes } from "./routes/verified-ai-games.js";
+import { aiRivalRoutes } from "./routes/ai-rivals.js";
 import { config } from "./config.js";
 
 export function buildApp() {
@@ -57,6 +58,7 @@ export function buildApp() {
   app.register(progressionRoutes, { prefix: "/progression" });
   app.register(gemRoutes, { prefix: "/gems" });
   app.register(verifiedAiGameRoutes, { prefix: "/ai-games" });
+  app.register(aiRivalRoutes, { prefix: "/ai-rivals" });
 
   return app;
 }
