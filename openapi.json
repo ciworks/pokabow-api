@@ -3,7 +3,7 @@
   "info": {
     "title": "Tiletopia API",
     "version": "1.0.0",
-    "description": "Authentication, game turn, and achievement API. Log in or register to obtain a one-hour bearer token."
+    "description": "Authentication, game turn, and achievement API. Provisional accounts use a one-hour access token and a rotating device renewal token."
   },
   "servers": [
     {
@@ -43,9 +43,127 @@
     {
       "name": "Online play",
       "description": "Authoritative casual live PvP, separate from local-game mirrors."
+    },
+    {
+      "name": "Tournaments",
+      "description": "Authoritative single-elimination tournaments; see docs/TOURNAMENTS.md for payloads"
+    },
+    {
+      "name": "Tournament administration",
+      "description": "ADMIN_EMAILS allowlisted tournament management"
     }
   ],
   "paths": {
+    "/auth/provisional": {
+      "post": {
+        "tags": ["Authentication"], "summary": "Create a provisional player and device session",
+        "security": [],
+        "responses": {"201": {"description": "Unverified account and session", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DeviceSession"}}}}}
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "tags": ["Authentication"], "summary": "Rotate a device renewal token",
+        "security": [],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RefreshRequest"}}}},
+        "responses": {"200": {"description": "Rotated session", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DeviceSession"}}}}, "401": {"description": "Invalid or revoked session"}}
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": ["Authentication"], "summary": "Revoke a device session",
+        "security": [],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/RefreshRequest"}}}},
+        "responses": {"204": {"description": "Session revoked or already absent"}}
+      }
+    },
+    "/auth/email/change/request": {
+      "post": {
+        "tags": ["Authentication"], "summary": "Send a code to a proposed email address",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/EmailRequest"}}}},
+        "responses": {"202": {"description": "Verification code requested"}, "409": {"description": "Email already used"}, "503": {"description": "Mail delivery unavailable"}}
+      }
+    },
+    "/auth/email/change/confirm": {
+      "post": {
+        "tags": ["Authentication"], "summary": "Confirm a new email address",
+        "security": [],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/EmailCodeRequest"}}}},
+        "responses": {"200": {"description": "Email updated and verified"}, "400": {"description": "Invalid or expired code"}, "409": {"description": "Email already used"}}
+      }
+    },
+    "/auth/email/sign-in/request": {
+      "post": {
+        "tags": ["Authentication"], "summary": "Request a code for a verified email",
+        "security": [],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/EmailRequest"}}}},
+        "responses": {"202": {"description": "Generic check-email response"}, "503": {"description": "Mail delivery unavailable"}}
+      }
+    },
+    "/auth/email/sign-in/confirm": {
+      "post": {
+        "tags": ["Authentication"], "summary": "Sign in with a one-time email code",
+        "security": [],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/EmailCodeRequest"}}}},
+        "responses": {"200": {"description": "Device session", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DeviceSession"}}}}, "400": {"description": "Invalid or expired code"}}
+      }
+    },
+    "/health/ready": {
+      "get": {"tags": ["Health"], "summary": "Check API and PostgreSQL readiness", "security": [], "responses": {"200": {"description": "API and database reachable"}, "503": {"description": "Database unavailable"}}}
+    },
+    "/tournaments/": {
+      "get": {"tags": ["Tournaments"], "summary": "List published tournaments and my entries", "responses": {"200": {"description": "Tournament list"}}}
+    },
+    "/tournaments/{id}": {
+      "get": {"tags": ["Tournaments"], "summary": "Read tournament detail and my eligibility", "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "Tournament detail"}}}
+    },
+    "/tournaments/{id}/eligibility": {
+      "get": {"tags": ["Tournaments"], "summary": "Read my entry requirements and registration decision", "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "Eligibility"}}}
+    },
+    "/tournaments/{id}/register": {
+      "post": {"tags": ["Tournaments"], "summary": "Reserve seat and debit stake idempotently", "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["requestId"], "properties": {"requestId": {"type": "string", "format": "uuid"}}}}}}, "responses": {"200": {"description": "Entry and balance after stake"}, "409": {"description": "Closed, full, ineligible or already entered"}}}
+    },
+    "/tournaments/{id}/withdraw": {
+      "post": {"tags": ["Tournaments"], "summary": "Withdraw with refund before start or forfeit after start", "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "Entry and refunded amount"}}}
+    },
+    "/tournaments/{id}/bracket": {
+      "get": {"tags": ["Tournaments"], "summary": "Read public bracket after the draw", "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "Bracket and matches"}}}
+    },
+    "/tournaments/{id}/leaderboard": {
+      "get": {"tags": ["Tournaments"], "summary": "Read tournament placements", "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "Leaderboard"}}}
+    },
+    "/tournaments/{id}/entrants/{registrationId}/avatar": {
+      "get": {"tags": ["Tournaments"], "summary": "Download drawn entrant's public PNG avatar", "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"in": "path", "name": "registrationId", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "PNG avatar", "content": {"image/png": {"schema": {"type": "string", "format": "binary"}}}}, "404": {"description": "Undrawn or absent avatar"}}}
+    },
+    "/tournaments/matches/current": {
+      "get": {"tags": ["Tournaments"], "summary": "Read my current tournament match", "responses": {"200": {"description": "Match or null"}}}
+    },
+    "/tournaments/matches/{matchId}": {
+      "get": {"tags": ["Tournaments"], "summary": "Read my private tournament match view", "parameters": [{"in": "path", "name": "matchId", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "Match view"}}}
+    },
+    "/tournaments/matches/{matchId}/join": {
+      "post": {"tags": ["Tournaments"], "summary": "Join a ready match", "parameters": [{"in": "path", "name": "matchId", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "Updated match view"}}}
+    },
+    "/tournaments/matches/{matchId}/commands": {
+      "post": {"tags": ["Tournaments"], "summary": "Submit place, swap or resign command", "parameters": [{"in": "path", "name": "matchId", "required": true, "schema": {"type": "string", "format": "uuid"}}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["commandId", "expectedVersion", "action"], "properties": {"commandId": {"type": "string", "format": "uuid"}, "expectedVersion": {"type": "integer"}, "action": {"type": "string", "enum": ["place", "swap", "resign"]}, "placements": {"type": "array", "items": {"type": "object"}}, "tileIds": {"type": "array", "items": {"type": "string"}}}}}}}, "responses": {"200": {"description": "Updated private match view"}}}
+    },
+    "/admin/api/tournaments/": {
+      "get": {"tags": ["Tournament administration"], "summary": "List all tournaments", "responses": {"200": {"description": "Tournament list"}, "403": {"description": "Admin access required"}}},
+      "post": {"tags": ["Tournament administration"], "summary": "Create tournament draft", "responses": {"201": {"description": "Draft"}}}
+    },
+    "/admin/api/tournaments/{id}": {
+      "get": {"tags": ["Tournament administration"], "summary": "Read configuration, entrants, bracket and audit", "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "Admin detail"}}},
+      "patch": {"tags": ["Tournament administration"], "summary": "Replace draft configuration", "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "Updated draft"}, "409": {"description": "Published rules locked"}}}
+    },
+    "/admin/api/tournaments/{id}/publish": {
+      "post": {"tags": ["Tournament administration"], "summary": "Publish versioned rules and open registration", "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "Published tournament"}}}
+    },
+    "/admin/api/tournaments/{id}/start": {
+      "post": {"tags": ["Tournament administration"], "summary": "Start due bracket", "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "Admin detail"}, "409": {"description": "Not due"}}}
+    },
+    "/admin/api/tournaments/{id}/cancel": {
+      "post": {"tags": ["Tournament administration"], "summary": "Cancel tournament and refund paid entries", "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "Cancelled tournament"}}}
+    },
     "/ai-rivals/": {
       "get": {
         "tags": ["Verified AI"],
@@ -2304,6 +2422,29 @@
       }
     },
     "schemas": {
+      "RefreshRequest": {
+        "type": "object", "required": ["refreshToken"], "additionalProperties": false,
+        "properties": {"refreshToken": {"type": "string"}}
+      },
+      "EmailRequest": {
+        "type": "object", "required": ["email"], "additionalProperties": false,
+        "properties": {"email": {"type": "string", "format": "email"}}
+      },
+      "EmailCodeRequest": {
+        "type": "object", "required": ["email", "code"], "additionalProperties": false,
+        "properties": {"email": {"type": "string", "format": "email"}, "code": {"type": "string", "minLength": 16, "maxLength": 16}}
+      },
+      "DeviceSession": {
+        "type": "object", "required": ["token", "refreshToken", "user"],
+        "properties": {
+          "token": {"type": "string", "description": "One-hour access JWT"},
+          "refreshToken": {"type": "string", "description": "Opaque rotating renewal token; store only in protected device storage"},
+          "user": {"type": "object", "required": ["id", "email", "displayName", "emailVerified"], "properties": {
+            "id": {"type": "string", "format": "uuid"}, "email": {"type": "string", "format": "email"},
+            "displayName": {"type": "string"}, "emailVerified": {"type": "boolean"}
+          }}
+        }
+      },
       "Health": {
         "type": "object",
         "required": [
@@ -2337,6 +2478,10 @@
           },
           "displayName": {
             "type": "string"
+          },
+          "emailVerified": {
+            "type": "boolean",
+            "description": "True only after ownership of this email has been confirmed"
           }
         }
       },

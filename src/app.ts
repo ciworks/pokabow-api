@@ -13,7 +13,10 @@ import { progressionRoutes } from "./routes/progression.js";
 import { gemRoutes } from "./routes/gems.js";
 import { verifiedAiGameRoutes } from "./routes/verified-ai-games.js";
 import { aiRivalRoutes } from "./routes/ai-rivals.js";
+import { tournamentRoutes } from "./routes/tournaments.js";
+import { tournamentAdminRoutes } from "./routes/tournament-admin.js";
 import { config } from "./config.js";
+import { db } from "./db.js";
 
 export function buildApp() {
   if (!config.jwtSecret || Buffer.byteLength(config.jwtSecret) < 32) {
@@ -37,6 +40,15 @@ export function buildApp() {
   app.get("/health", async () => ({
     status: "ok"
   }));
+  app.get("/health/ready", async (_request, reply) => {
+    try {
+      await db.query("SELECT 1");
+      return reply.header("Cache-Control", "no-store").send({ status: "ok" });
+    } catch {
+      return reply.code(503).header("Cache-Control", "no-store")
+        .send({ status: "unavailable" });
+    }
+  });
 
   app.register(gameRoutes, {
     prefix: "/games"
@@ -59,6 +71,9 @@ export function buildApp() {
   app.register(gemRoutes, { prefix: "/gems" });
   app.register(verifiedAiGameRoutes, { prefix: "/ai-games" });
   app.register(aiRivalRoutes, { prefix: "/ai-rivals" });
+  app.register(tournamentRoutes, { prefix: "/tournaments" });
+  app.register(tournamentAdminRoutes, { prefix: "/admin/api/tournaments" });
 
   return app;
 }
+

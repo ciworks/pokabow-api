@@ -1,10 +1,15 @@
 import { findUserById } from "../repositories/user-repository.js";
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { sessionIsActive } from "./device-sessions.js";
 
 export async function verifyIdentity(request: FastifyRequest, reply: FastifyReply) {
   try {
     await request.jwtVerify();
     if (typeof request.user.sub !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request.user.sub)) {
+      return reply.code(401).send({ error: "UNAUTHORIZED" });
+    }
+    if (request.user.sid !== undefined &&
+        (typeof request.user.sid !== "string" || !(await sessionIsActive(request.user.sid)))) {
       return reply.code(401).send({ error: "UNAUTHORIZED" });
     }
   } catch {

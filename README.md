@@ -2,8 +2,11 @@
 
 ## Setup
 
+`GET /health/ready` returns 200 only while the API can query PostgreSQL;
+otherwise it returns 503. The game uses it for a periodic connection warning.
+
 1. Install dependencies with `npm install`.
-2. Create a PostgreSQL database and apply the numbered SQL files in `migrations/` in order through `019_ai_rivals.sql` (omit optional `003_test_user.sql` outside development). Existing databases should apply missing migrations in order.
+2. Create a PostgreSQL database and apply the numbered SQL files in `migrations/` in order through `022_passwordless_sessions.sql` (omit optional `003_test_user.sql` outside development). Existing databases should apply missing migrations in order.
 3. Set `DATABASE_URL` and `JWT_SECRET` in `.env`. Use a unique random JWT secret of at least 32 bytes. To enable Google sign in, configure a Google OAuth web client and set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` (the exact registered callback URL). See `.env.example`.
 4. Run `npm run start`. The start script builds the TypeScript code first.
 
@@ -24,9 +27,26 @@ membership and only runs against localhost outside production mode.
 
 ## Postman
 
-Import `openapi.json` as an OpenAPI specification. The default server is `http://localhost:3000`; update the server URL in Postman if your `PORT` differs. Use `POST /auth/login` or `POST /auth/register` to get a token, then set it as a Bearer token for the protected requests. The login example uses the optional test-user migration.
+Import `openapi.json` as an OpenAPI specification. The default server is `http://localhost:3000`; update the server URL in Postman if your `PORT` differs. Use `POST /auth/provisional` to get a device session, then set its access token as a Bearer token for protected requests. Legacy password login remains for existing API clients and the optional test-user migration.
 
 ## Authentication
+
+The prototype passwordless API requires migration `022_passwordless_sessions.sql`.
+`POST /auth/provisional` creates a generated, unverified account and returns an
+access token, opaque `refreshToken`, and user profile. `POST /auth/refresh`
+accepts `{ "refreshToken": "..." }` and rotates it; `POST /auth/logout` accepts
+the same body and revokes that device session. A revoked session's access token
+is rejected by protected routes. Renewal tokens expire after 30 days.
+
+`POST /auth/email/change/request` requires a bearer token and `{ "email": "..." }`.
+`POST /auth/email/change/confirm` accepts `{ "email": "...", "code": "..." }`.
+`POST /auth/email/sign-in/request` accepts an email and gives a generic response;
+`POST /auth/email/sign-in/confirm` accepts email and code and returns a new
+session. Codes are single use and expire after 10 minutes. The email actions
+need `AUTH_EMAIL_WEBHOOK_URL` and `AUTH_EMAIL_WEBHOOK_KEY`; the relay must accept
+an HTTPS JSON POST with `to`, `subject`, and `text` fields. Do not expose these
+actions to players until delivery is configured and verified. Use TLS for all
+authentication traffic outside local development.
 
 Account avatar upload, download, and removal are available at
 `PUT/GET/DELETE /auth/me/avatar` with a bearer token. See
@@ -66,6 +86,11 @@ the account but trusts the game client to report qualifying gameplay; the API
 does not yet verify match evidence or replay Polkabow rules.
 
 ## Gems
+
+Tournament entry debits, withdrawal/cancellation refunds, and champion prizes are
+recorded in the same confirmed wallet ledger. Apply migration 021 before starting
+this API version. See [Tournament API](docs/TOURNAMENTS.md) for the player and
+administrator endpoints, request bodies, and scheduler behavior.
 
 `GET /gems/me` returns the authenticated account's confirmed integer balance and
 up to 50 newest immutable transactions. The match Gem pot is never a balance.

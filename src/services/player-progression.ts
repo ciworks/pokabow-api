@@ -74,13 +74,25 @@ export function rateMatch(player: Skill, opponent: Skill, score: 0 | 0.5 | 1): S
 export async function awardOnlineMatch(
   client: PoolClient, matchId: string, playerA: string | null, playerB: string | null, outcome: number,
 ): Promise<void> {
+  return awardDecisiveMatch(client, "player_match_awards", matchId, playerA, playerB, outcome);
+}
+
+export async function awardTournamentMatch(
+  client: PoolClient, matchId: string, playerA: string | null, playerB: string | null, outcome: number,
+): Promise<void> {
+  return awardDecisiveMatch(client, "tournament_match_awards", matchId, playerA, playerB, outcome);
+}
+
+async function awardDecisiveMatch(client: PoolClient,
+  awardTable: "player_match_awards" | "tournament_match_awards",
+  matchId: string, playerA: string | null, playerB: string | null, outcome: number): Promise<void> {
   // INCOMPLETE and deleted-account matches have no trusted two-player result.
   if (!playerA || !playerB || ![1, 2, 3].includes(outcome)) return;
   for (const userId of [playerA, playerB]) {
     await client.query("INSERT INTO player_progression (user_id) VALUES ($1) ON CONFLICT DO NOTHING", [userId]);
     await client.query("INSERT INTO player_skill (user_id) VALUES ($1) ON CONFLICT DO NOTHING", [userId]);
   }
-  const inserted = await client.query<{ user_id: string }>(`INSERT INTO player_match_awards
+  const inserted = await client.query<{ user_id: string }>(`INSERT INTO ${awardTable}
     (match_id, user_id, experience_awarded) VALUES ($1, $2, $4), ($1, $3, $4)
     ON CONFLICT DO NOTHING RETURNING user_id`, [matchId, playerA, playerB, EXPERIENCE_PER_ONLINE_MATCH]);
   if (inserted.rows.length === 0) return;

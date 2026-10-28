@@ -55,8 +55,11 @@ test("account deletion requires identity and confirmation, commits before succes
     assert.equal(response.statusCode, 200);
     assert.deepEqual(response.json(), { success: true });
     assert.equal(queries[0].sql, "BEGIN");
-    assert.deepEqual(queries[1].params, [id], "target comes only from the signed subject");
-    assert.deepEqual(queries.slice(3, 6).map(q => q.params), [[[gameId]], [[gameId]], [[gameId]]]);
+    assert.deepEqual(queries.find(q => q.sql.includes("SELECT id FROM users WHERE id = $1 FOR UPDATE"))?.params,
+      [id], "target comes only from the signed subject");
+    assert.deepEqual(queries.filter(q => q.sql.startsWith("DELETE FROM game_") ||
+      q.sql.startsWith("DELETE FROM games ")).map(q => q.params),
+    [[[gameId]], [[gameId]], [[gameId]]]);
     assert.deepEqual(queries.at(-2).params, [id]);
     assert.equal(queries.at(-1).sql, "COMMIT");
     assert.equal(released, 2);

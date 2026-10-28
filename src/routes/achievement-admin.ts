@@ -21,7 +21,7 @@ const create = details.extend({
   target: z.number().int().min(1).max(100000)
 });
 
-async function authorizeAdmin(request: FastifyRequest, reply: FastifyReply) {
+export async function authorizeAdmin(request: FastifyRequest, reply: FastifyReply) {
   await authenticate(request, reply);
   if (reply.sent) return;
   const allowed = (process.env.ADMIN_EMAILS ?? "").split(",")

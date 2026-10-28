@@ -1,10 +1,12 @@
 import { db } from "../db.js";
+import { handleTournamentAccountDeletion } from "../services/tournament-bracket.js";
 
 export interface UserRecord {
   id: string;
   email: string | null;
   display_name: string;
   password_hash: string | null;
+  email_verified: boolean;
 }
 
 export async function createUser(email: string, displayName: string, passwordHash: string) {
@@ -19,7 +21,7 @@ export async function createUser(email: string, displayName: string, passwordHas
 
 export async function findUserByEmail(email: string) {
   const result = await db.query<UserRecord>(
-    `SELECT id, email, display_name, password_hash FROM users WHERE email = $1`,
+    `SELECT id, email, display_name, password_hash, email_verified FROM users WHERE email = $1`,
     [email]
   );
   return result.rows[0] ?? null;
@@ -27,14 +29,14 @@ export async function findUserByEmail(email: string) {
 
 export async function findUserById(id: string) {
   const result = await db.query<UserRecord>(
-    `SELECT id, email, display_name, password_hash FROM users WHERE id = $1`,
+    `SELECT id, email, display_name, password_hash, email_verified FROM users WHERE id = $1`,
     [id]
   );
   return result.rows[0] ?? null;
 }
 
 export async function updateUserDisplayName(id: string, displayName: string) {
-  const result = await db.query<Pick<UserRecord, "id" | "email" | "display_name">>(
+  const result = await db.query<Pick<UserRecord, "id" | "email" | "display_name" | "email_verified">>(
     `UPDATE users SET display_name = $1
      WHERE id = $2 AND (
        lower(btrim(display_name)) = lower(btrim($1))
@@ -43,7 +45,7 @@ export async function updateUserDisplayName(id: string, displayName: string) {
          WHERE other.id <> $2 AND lower(btrim(other.display_name)) = lower(btrim($1))
        )
      )
-     RETURNING id, email, display_name`,
+     RETURNING id, email, display_name, email_verified`,
     [displayName, id]
   );
   return result.rows[0] ?? null;
@@ -97,6 +99,7 @@ export async function deleteUser(id: string) {
   const client = await db.connect();
   try {
     await client.query("BEGIN");
+    await handleTournamentAccountDeletion(client, id);
     await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [id]);
     const games = await client.query<{ id: string }>(
       `SELECT id FROM games WHERE created_by = $1 OR current_player_id = $1
