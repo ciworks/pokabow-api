@@ -59,11 +59,6 @@ export function buildApp() {
   app.register(gemRoutes, { prefix: "/gems" });
   app.register(verifiedAiGameRoutes, { prefix: "/ai-games" });
   app.register(aiRivalRoutes, { prefix: "/ai-rivals" });
-  app.register(onlineGameRoutes, { prefix: "/online-games" });
-  app.register(progressionRoutes, { prefix: "/progression" });
-  app.register(gemRoutes, { prefix: "/gems" });
-  app.register(verifiedAiGameRoutes, { prefix: "/ai-games" });
-  app.register(aiRivalRoutes, { prefix: "/ai-rivals" });
 
   return app;
 }
