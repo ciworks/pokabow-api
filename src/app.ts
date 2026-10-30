@@ -18,6 +18,7 @@ import { aiRivalRoutes } from "./routes/ai-rivals.js";
 import { tournamentRoutes } from "./routes/tournaments.js";
 import { tournamentAdminRoutes } from "./routes/tournament-admin.js";
 import { staffAuthRoutes } from "./routes/staff-auth.js";
+import { supportAdminRoutes } from "./routes/support-admin.js";
 import { config } from "./config.js";
 import { db } from "./db.js";
 
@@ -84,6 +85,7 @@ export function buildApp() {
   app.register(tournamentRoutes, { prefix: "/tournaments" });
   app.register(staffAuthRoutes, { prefix: "/admin/api/auth" });
   app.register(tournamentAdminRoutes, { prefix: "/admin/api/tournaments" });
+  app.register(supportAdminRoutes, { prefix: "/admin/api" });
 
   return app;
 }

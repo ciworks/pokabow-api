@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { generate, generateSecret } from "otplib";
+import sharp from "sharp";
 
 process.env.JWT_SECRET = "tournament-postgres-tests-only-at-least-thirty-two-bytes";
 process.env.STAFF_ENCRYPTION_KEY = "a".repeat(64);
@@ -25,7 +26,7 @@ test("tournament entries, live bracket, prize and cancellation use one authorita
     "012_player_progression.sql", "013_gem_wallet.sql", "014_verified_ai_matches.sql",
     "015_verified_ai_gems.sql", "016_remove_turn_deadlines.sql", "017_rewarded_ad_gems.sql",
     "018_online_gem_limits.sql", "019_ai_rivals.sql", "020_multiple_verified_ai_matches.sql",
-    "021_tournaments.sql", "022_passwordless_sessions.sql", "023_staff_admin.sql"]) {
+    "021_tournaments.sql", "022_passwordless_sessions.sql", "023_staff_admin.sql", "024_tournament_artwork.sql"]) {
     await db.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
   }
   const app = buildApp();
@@ -56,6 +57,21 @@ test("tournament entries, live bracket, prize and cancellation use one authorita
   assert.equal((await recoveryLogin()).statusCode, 200);
   assert.equal((await recoveryLogin()).statusCode, 401, "a recovery code is single use");
   const token = new Map([admin, ...players].map(id => [id, app.jwt.sign({ sub: id })]));
+  assert.equal((await app.inject({ method: "GET", url: "/admin/api/players" })).statusCode, 401);
+  assert.equal((await app.inject({ method: "GET", url: "/admin/api/games" })).statusCode, 401);
+  const staffHeaders = { cookie: staffCookie };
+  const foundPlayers = await app.inject({ method: "GET", url: "/admin/api/players?search=Player%200", headers: staffHeaders });
+  assert.equal(foundPlayers.statusCode, 200, foundPlayers.body);
+  assert.equal(foundPlayers.json().players[0].id, players[0]);
+  assert.equal(foundPlayers.headers["cache-control"], "no-store");
+  const playerDetail = await app.inject({ method: "GET", url: `/admin/api/players/${players[0]}`, headers: staffHeaders });
+  assert.equal(playerDetail.statusCode, 200, playerDetail.body);
+  assert.equal(playerDetail.json().player.gemBalance, "100");
+  assert.equal("password_hash" in playerDetail.json().player, false);
+  const emptyGames = await app.inject({ method: "GET", url: `/admin/api/games?playerId=${players[0]}`, headers: staffHeaders });
+  assert.equal(emptyGames.statusCode, 200, emptyGames.body);
+  assert.deepEqual(emptyGames.json().games, []);
+  assert.equal((await app.inject({ method: "GET", url: "/admin/api/games?kind=invalid", headers: staffHeaders })).statusCode, 400);
   const request = async (id, method, url, payload, status = 200) => {
     const response = await app.inject({ method, url,
       headers: url.startsWith("/admin/api/") ? { cookie: staffCookie,
@@ -79,7 +95,39 @@ test("tournament entries, live bracket, prize and cancellation use one authorita
     assert.equal(listed.tournaments.some(t => t.id === id), true);
     assert.equal((await request(admin, "GET", "/admin/api/tournaments?cursor=bad", undefined, 400)).error,
       "INVALID_CURSOR");
+    assert.deepEqual(created.tournament.artwork,
+      { fallback: "trophy-confetti", badge: null, background: null });
+    const artworkPng = await sharp({ create: { width: 512, height: 256, channels: 4,
+      background: { r: 40, g: 150, b: 150, alpha: 0.5 } } }).png().toBuffer();
+    const artworkPayload = { contentType: "image/png", data: artworkPng.toString("base64") };
+    const artPath = `/admin/api/tournaments/${id}/artwork`;
+    const badgeUpload = await request(admin, "PUT", `${artPath}/badge`, artworkPayload);
+    assert.equal(badgeUpload.artwork.badge.width, 512);
+    await request(admin, "PUT", `${artPath}/background`, artworkPayload);
+    const preview = await app.inject({ url: badgeUpload.artwork.badge.url, headers: staffHeaders });
+    assert.equal(preview.statusCode, 200, preview.body);
+    assert.deepEqual(preview.rawPayload, artworkPng);
+    await request(players[0], "GET", `/tournaments/${id}/artwork/badge`, undefined, 404);
+    assert.ok((await request(admin, "GET", `/admin/api/tournaments/${id}`)).tournament.artwork.background);
+    assert.ok((await request(admin, "GET", "/admin/api/tournaments")).tournaments.find(t => t.id === id).artwork.badge);
+    const removed = await request(admin, "DELETE", `${artPath}/background`);
+    assert.equal(removed.artwork.background, null);
+    assert.ok(removed.artwork.badge);
+    await request(admin, "PUT", `${artPath}/background`, artworkPayload);
+    const draftUpdate = await request(admin, "PATCH", `/admin/api/tournaments/${id}`, config);
+    assert.ok(draftUpdate.tournament.artwork.badge, "ordinary config updates preserve uploaded art");
     await request(admin, "POST", `/admin/api/tournaments/${id}/publish`);
+    const publicDetail = await request(players[0], "GET", `/tournaments/${id}`);
+    const publicList = await request(players[0], "GET", "/tournaments");
+    assert.deepEqual(publicList.tournaments.find(t => t.id === id).artwork, publicDetail.tournament.artwork);
+    const publishedImage = await app.inject({ url: publicDetail.tournament.artwork.badge.url,
+      headers: { authorization: `Bearer ${token.get(players[0])}` } });
+    assert.equal(publishedImage.statusCode, 200);
+    assert.deepEqual(publishedImage.rawPayload, artworkPng);
+    await request(admin, "DELETE", `${artPath}/badge`, undefined, 409);
+    await request(admin, "PUT", `${artPath}/background`, artworkPayload, 409);
+    assert.ok((await request(admin, "GET", `/admin/api/tournaments/${id}`)).audit.some(a => a.action === "upload_artwork"));
+
     assert.equal((await request(players[0], "GET", `/tournaments/${id}/bracket`)).matches.length, 0,
       "no entrant identity appears before the draw");
     assert.equal((await request(players[0], "GET", `/tournaments/${id}/eligibility`)).eligibility.canRegister, true);

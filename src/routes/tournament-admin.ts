@@ -4,6 +4,7 @@ import { authenticateStaff, requireStaffMutation, verifyEmergencyCode } from "..
 import { TournamentError } from "../services/tournament-core.js";
 import { adminDetail, adminFinance, adminList, cancel, createDraft, publish, updateDraft } from "../services/tournament-service.js";
 import { startDueTournament } from "../services/tournament-bracket.js";
+import { registerTournamentArtworkRoutes } from "./tournament-artwork.js";
 
 const id = z.string().uuid();
 const configuration = z.object({
@@ -22,6 +23,7 @@ const configuration = z.object({
 export async function tournamentAdminRoutes(app: FastifyInstance) {
   app.addHook("onRequest", authenticateStaff);
   app.addHook("onSend", async (_request, reply) => { reply.header("Cache-Control", "no-store"); });
+  registerTournamentArtworkRoutes(app, true);
   app.get("/", async (request, reply) => {
     const query = z.object({ status: z.enum(["draft", "open", "live", "completed", "cancelled"]).optional(),
       search: z.string().trim().min(1).max(80).optional(), cursor: z.string().max(300).optional() }).strict().safeParse(request.query);

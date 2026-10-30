@@ -5,6 +5,10 @@ import { clock, eligibility, lockTournament, lockTournamentPlayer, publicTournam
 import { bracket, forfeitRegistration } from "./tournament-bracket.js";
 import type { StaffRole } from "../auth/staff.js";
 
+function adminTournament(tour: TournamentRow, filled: number) {
+  return publicTournament(tour, filled, null, true);
+}
+
 export type TournamentConfig = {
   name: string; registrationOpensAt: string; startsAt: string; capacity: 4 | 8 | 16;
   entryStake: number; championPrize: number; minTableLevel: number;
@@ -34,7 +38,7 @@ export async function createDraft(actorId: string, config: TournamentConfig) {
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
     [...columns(config), actorId])).rows[0];
     await audit(client, row.id, actorId, "create", { rulesVersion: row.rules_version, configuration: config });
-    return { tournament: publicTournament(row, 0) };
+    return { tournament: adminTournament(row, 0) };
   });
 }
 
@@ -51,8 +55,8 @@ export async function updateDraft(actorId: string, id: string, config: Tournamen
       min_gem_balance=$10, turn_seconds=$11, rules_version=rules_version+1
       WHERE id=$1 RETURNING *`, [id, ...columns(config)])).rows[0];
     await audit(client, id, actorId, "update_draft", { rulesVersion: row.rules_version,
-      before: publicTournament(tour, 0), after: config });
-    return { tournament: publicTournament(row, 0) };
+      before: adminTournament(tour, 0), after: config });
+    return { tournament: adminTournament(row, 0) };
   });
 }
 
@@ -70,14 +74,14 @@ export async function publish(actorId: string, id: string) {
       published_at=clock_timestamp(), published_rules=$2 WHERE id=$1 RETURNING *`,
     [id, JSON.stringify(rules)])).rows[0];
     await audit(client, id, actorId, "publish", { rulesVersion: row.rules_version, publishedRules: rules });
-    return { tournament: publicTournament(row, 0) };
+    return { tournament: adminTournament(row, 0) };
   });
 }
 
 export async function cancel(actorId: string, id: string, role: StaffRole, reason?: string) {
   return transaction(async client => {
     const tour = await lockTournament(client, id);
-    if (tour.status === "cancelled") return { tournament: publicTournament(tour, 0) };
+    if (tour.status === "cancelled") return { tournament: adminTournament(tour, 0) };
     if (tour.status === "completed") throw new TournamentError("COMPLETED_TOURNAMENT_LOCKED");
     if (role === "viewer") throw new TournamentError("STAFF_FORBIDDEN", 403);
     if (tour.status === "live" && (role !== "emergency_operator" || !reason?.trim()))
@@ -102,7 +106,7 @@ export async function cancel(actorId: string, id: string, role: StaffRole, reaso
     [id, actorId, tour.status === "live" ? "emergency_cancel" : "cancel",
       JSON.stringify({ statusBefore: tour.status, refundedEntries: refundable.length,
         refundedGems: refundable.reduce((total, reg) => total + Number(reg.paid_stake), 0) }), reason ?? null]);
-    return { tournament: publicTournament(row, registrations.filter(r => r.status !== "withdrawn").length) };
+    return { tournament: adminTournament(row, registrations.filter(r => r.status !== "withdrawn").length) };
   });
 }
 
@@ -126,7 +130,7 @@ export async function adminList(filters: { status?: string; search?: string; cur
   [filters.status ?? null, filters.search ?? null, cursor?.startsAt ?? null, cursor?.id ?? null]);
   const rows = found.rows.slice(0, 50);
   const last = rows.at(-1);
-  return { tournaments: rows.map(row => publicTournament(row, Number(row.filled))),
+  return { tournaments: rows.map(row => adminTournament(row, Number(row.filled))),
     nextCursor: found.rows.length > 50 && last ? Buffer.from(JSON.stringify({ startsAt: last.starts_at,
       id: last.id })).toString("base64url") : null };
 }
@@ -138,7 +142,7 @@ export async function adminDetail(id: string) {
     "SELECT * FROM tournament_registrations WHERE tournament_id=$1 ORDER BY registered_at", [id])).rows;
   const auditRows = (await db.query(`SELECT action, details, actor_id, staff_actor_id, reason, created_at
     FROM tournament_admin_audit WHERE tournament_id=$1 ORDER BY id DESC LIMIT 100`, [id])).rows;
-  return { tournament: publicTournament(tour, registrations.filter(r => r.status !== "withdrawn").length),
+  return { tournament: adminTournament(tour, registrations.filter(r => r.status !== "withdrawn").length),
     publishedRules: tour.published_rules,
     registrations: registrations.map(reg => ({ ...registrationRow(reg), userId: reg.user_id,
       displayName: reg.public_name })),

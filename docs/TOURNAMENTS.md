@@ -1,5 +1,90 @@
 # Tournament API
 
+## Tournament artwork
+
+**Implemented in source; migration required:** apply
+`migrations/024_tournament_artwork.sql` after migration 023. Existing tournaments
+start with no custom artwork. No gameplay or wallet data is changed.
+
+Every tournament in player/admin list and detail responses includes:
+
+```json
+{
+  "artwork": {
+    "fallback": "trophy-confetti",
+    "badge": null,
+    "background": null
+  }
+}
+```
+
+A custom asset replaces its null slot with
+`{ "url": "...", "contentType": "image/png", "width": 512, "height": 512, "version": "SHA256" }`.
+URLs are API-origin-relative and versioned. Player responses use
+`/tournaments/{id}/artwork/{kind}?v={version}`; admin responses use
+`/admin/api/tournaments/{id}/artwork/{kind}?v={version}` so drafts can be previewed.
+Use the corresponding bearer or staff-cookie authentication. Artwork bytes do
+not appear in lists/details.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| PUT | `/admin/api/tournaments/{id}/artwork/{kind}` | Upload or replace draft badge/background. |
+| DELETE | `/admin/api/tournaments/{id}/artwork/{kind}` | Remove one draft asset; returns updated artwork metadata. |
+| GET | `/admin/api/tournaments/{id}/artwork/{kind}` | Staff preview, including drafts. |
+| GET | `/tournaments/{id}/artwork/{kind}` | Authenticated player image read; draft assets return 404. |
+
+`kind` is `badge` or `background`. PUT takes
+`{ "contentType": "image/png", "data": "<canonical base64>" }`, also accepting
+`image/jpeg`. Upload raw base64 without a data-URI prefix. Both mutations require
+a staff operator session and CSRF token; viewers can preview only. Mutations
+return `{ "artwork": { ... } }`. Create/update draft configuration bodies remain
+unchanged; create the draft first, then upload its assets.
+
+Maximum source size is 2 MiB; each input side must be 32–2048px.
+Only single-image PNG/JPEG inputs matching the declared type are accepted.
+Images are fully decoded and re-encoded as PNG, removing source metadata,
+preserving transparency and aspect ratio, and fitting within 512px for badges
+or 1536px for backgrounds without enlargement. Normalized output is capped at
+8 MiB. Both assets are optional and independent. Recommended authored assets:
+a square transparent badge and a transparent motif with space for panel text.
+The client controls background clipping, fade and low opacity; opacity is not
+baked into every upload.
+
+The bundled `trophy-confetti` identity is the default, not a remotely uploaded
+image. Clients use the built-in trophy for a missing/failed badge and the
+built-in trophy/confetti motif for a missing/failed background, independently.
+Clients predating this field should continue working; new clients also treat
+an absent `artwork` field as the default. The API does not generate background
+art from a badge. Upload a coordinated pair for themed tournaments.
+
+Uploads/removals lock the tournament row, commit bytes, metadata and an audit
+entry atomically, and are allowed on drafts only, matching existing published
+configuration restrictions. They do not increment the gameplay rules version.
+Publishing races serialize against artwork changes. Replacing an image changes
+its SHA-256 version; a stale version URL returns 404 rather than different bytes.
+Reads use `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`.
+
+Errors include `INVALID_REQUEST` (400), `INVALID_ARTWORK` (400),
+`INVALID_ARTWORK_DIMENSIONS` (400), `ARTWORK_TOO_LARGE` (413),
+`ARTWORK_NOT_FOUND` (404), `TOURNAMENT_NOT_FOUND` (404), and
+`PUBLISHED_RULES_LOCKED` (409), plus existing staff-auth/CSRF errors.
+An oversized HTTP body also returns the standard Fastify 413 error.
+
+The sibling admin draft editor now provides badge/background file pickers,
+a composed panel preview, and independent Remove controls. Upload after draft
+creation and save art before publishing. The Godot client loads published
+versioned textures and bundles trophy/confetti fallback assets. The backend
+provides the contract and storage; it does not ship those UI assets.
+
+Verification on 2026-10-30: TypeScript build passed. The standard API suite passed
+48 tests with five opt-in database tests skipped. The tournament PostgreSQL suite
+also passed separately in an isolated disposable database, including migration
+024, upload/removal, private draft and published image reads, list/detail metadata
+consistency, preservation across draft configuration updates, and published
+mutation locks alongside the existing registration/bracket/prize/refund lifecycle.
+No migration was applied to the application database. Admin/browser and mobile
+rendering remain unimplemented and untested for this feature.
+
 Apply `migrations/021_tournaments.sql` after the earlier numbered migrations and
 run the API server continuously. Its five-second scheduler starts due full
 brackets, cancels and refunds underfilled ones, and resolves join and turn

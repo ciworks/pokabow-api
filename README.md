@@ -74,6 +74,26 @@ or gameplay restoration.
 
 When the client finds that the current player has no legal move, call `POST /games/:gameId/pass` with a unique `turnId` and the current `expectedVersion`. The API records the pass, changes `games.current_player_id` to the other player, increments the game version, and returns `notification: "No valid move available, now opponents turn"` for the client to show as a toast. The pass endpoint currently supports two player games; the current game engine does not yet provide server side legal move validation.
 
+## Staff support views
+
+Dedicated staff sessions can inspect players and games through read-only routes
+under `/admin/api`. These routes require the staff cookie, return `Cache-Control:
+no-store`, and do not accept player bearer tokens.
+
+- `GET /admin/api/players?search=&page=` searches by display name, email, or exact
+  player ID and returns 25 accounts per page.
+- `GET /admin/api/players/{playerId}` returns profile and verification status,
+  avatar presence, Gem balance, progression, active session count, and the most
+  recent 30 achievements, tournament entries, and Gem transactions.
+- `GET /admin/api/games?kind=&playerId=&page=` lists 25 games per page. `kind` is
+  `client`, `online`, `ai`, or `tournament`.
+- `GET /admin/api/games/{kind}/{gameId}` returns a metadata summary and linked
+  players. Client-synced games are unverified. Raw game state and commands are
+  intentionally omitted from these support projections.
+
+All pages are capped at page 100. These routes cannot change accounts, sessions,
+balances, results, or match state.
+
 ## Achievements
 
 `GET /achievements` returns enabled achievement definitions with an

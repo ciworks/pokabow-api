@@ -7,6 +7,7 @@ import { bracket, commandTournamentMatch, currentTournamentMatch, getTournamentM
   joinTournamentMatch, leaderboard } from "../services/tournament-bracket.js";
 import { TournamentError } from "../services/tournament-core.js";
 import { detailForPlayer, listForPlayer, register, withdraw } from "../services/tournament-service.js";
+import { registerTournamentArtworkRoutes } from "./tournament-artwork.js";
 
 const id = z.string().uuid();
 const placement = z.object({ tileId: z.string().min(1).max(200), x: z.number().int().min(0).max(11),
@@ -31,6 +32,7 @@ async function send<T>(reply: { code: (status: number) => { send: (value: unknow
 export async function tournamentRoutes(app: FastifyInstance) {
   app.addHook("onRequest", authenticate);
   app.addHook("onSend", async (_request, reply) => { reply.header("Cache-Control", "no-store"); });
+  registerTournamentArtworkRoutes(app, false);
   app.get("/", async request => listForPlayer(request.user.sub));
   app.get("/matches/current", async request => ({ match: await currentTournamentMatch(request.user.sub) }));
   app.get("/matches/:matchId", async (request, reply) => {

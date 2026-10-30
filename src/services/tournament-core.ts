@@ -7,6 +7,9 @@ export class TournamentError extends Error {
   constructor(public code: string, public status = 409) { super(code); }
 }
 export type TournamentRow = {
+  artwork?: Partial<Record<"badge" | "background", {
+    contentType: "image/png"; width: number; height: number; version: string;
+  }>>;
   id: string; name: string; status: "draft" | "open" | "live" | "completed" | "cancelled";
   registration_opens_at: Date; starts_at: Date; capacity: number;
   entry_stake: string; champion_prize: string; min_table_level: number;
@@ -97,9 +100,19 @@ export async function eligibility(client: PoolClient, tour: TournamentRow, userI
   return { eligible: Object.values(requirements).every(value => value.met), requirements };
 }
 
-export function publicTournament(tour: TournamentRow, filled: number, own?: RegistrationRow | null) {
+export function tournamentArtwork(tour: TournamentRow, admin = false) {
+  const prefix = admin ? "/admin/api/tournaments" : "/tournaments";
+  const asset = (kind: "badge" | "background") => {
+    const metadata = tour.artwork?.[kind];
+    return metadata ? { ...metadata, url: `${prefix}/${tour.id}/artwork/${kind}?v=${metadata.version}` } : null;
+  };
+  return { fallback: "trophy-confetti" as const, badge: asset("badge"), background: asset("background") };
+}
+
+export function publicTournament(tour: TournamentRow, filled: number, own?: RegistrationRow | null, admin = false) {
   return {
     id: tour.id, name: tour.name, status: tour.status,
+    artwork: tournamentArtwork(tour, admin),
     registrationOpensAt: tour.registration_opens_at, startsAt: tour.starts_at,
     registrationClosesAt: tour.starts_at, capacity: tour.capacity, filledPlaces: filled,
     entryStake: Number(tour.entry_stake), championPrize: Number(tour.champion_prize),
