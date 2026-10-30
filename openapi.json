@@ -147,22 +147,34 @@
     "/tournaments/matches/{matchId}/commands": {
       "post": {"tags": ["Tournaments"], "summary": "Submit place, swap or resign command", "parameters": [{"in": "path", "name": "matchId", "required": true, "schema": {"type": "string", "format": "uuid"}}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["commandId", "expectedVersion", "action"], "properties": {"commandId": {"type": "string", "format": "uuid"}, "expectedVersion": {"type": "integer"}, "action": {"type": "string", "enum": ["place", "swap", "resign"]}, "placements": {"type": "array", "items": {"type": "object"}}, "tileIds": {"type": "array", "items": {"type": "string"}}}}}}}, "responses": {"200": {"description": "Updated private match view"}}}
     },
+    "/admin/api/auth/login": {
+      "post": {"tags": ["Staff authentication"], "summary": "Sign in with staff email, password and TOTP or recovery code", "security": [], "responses": {"200": {"description": "Staff session and CSRF token"}, "401": {"description": "Invalid credentials"}}}
+    },
+    "/admin/api/auth/me": {
+      "get": {"tags": ["Staff authentication"], "summary": "Current staff account and CSRF token", "security": [{"staffCookie": []}], "responses": {"200": {"description": "Staff session"}}}
+    },
+    "/admin/api/auth/logout": {
+      "post": {"tags": ["Staff authentication"], "summary": "Revoke staff session", "security": [{"staffCookie": []}], "parameters": [{"in": "header", "name": "x-csrf-token", "required": true, "schema": {"type": "string"}}], "responses": {"204": {"description": "Signed out"}}}
+    },
     "/admin/api/tournaments/": {
-      "get": {"tags": ["Tournament administration"], "summary": "List all tournaments", "responses": {"200": {"description": "Tournament list"}, "403": {"description": "Admin access required"}}},
-      "post": {"tags": ["Tournament administration"], "summary": "Create tournament draft", "responses": {"201": {"description": "Draft"}}}
+      "get": {"tags": ["Tournament administration"], "summary": "List tournaments, 50 per page", "security": [{"staffCookie": []}], "parameters": [{"in": "query", "name": "status", "schema": {"type": "string"}}, {"in": "query", "name": "search", "schema": {"type": "string"}}, {"in": "query", "name": "cursor", "schema": {"type": "string"}}], "responses": {"200": {"description": "Tournament page"}}},
+      "post": {"tags": ["Tournament administration"], "summary": "Create tournament draft", "security": [{"staffCookie": []}], "parameters": [{"in": "header", "name": "x-csrf-token", "required": true, "schema": {"type": "string"}}], "responses": {"201": {"description": "Draft"}}}
     },
     "/admin/api/tournaments/{id}": {
-      "get": {"tags": ["Tournament administration"], "summary": "Read configuration, entrants, bracket and audit", "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "Admin detail"}}},
-      "patch": {"tags": ["Tournament administration"], "summary": "Replace draft configuration", "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "Updated draft"}, "409": {"description": "Published rules locked"}}}
+      "get": {"tags": ["Tournament administration"], "summary": "Read configuration, entrants, bracket and audit", "security": [{"staffCookie": []}], "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "Admin detail"}}},
+      "patch": {"tags": ["Tournament administration"], "summary": "Replace draft configuration", "security": [{"staffCookie": []}], "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"in": "header", "name": "x-csrf-token", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "Updated draft"}, "409": {"description": "Published rules locked"}}}
+    },
+    "/admin/api/tournaments/{id}/finance": {
+      "get": {"tags": ["Tournament administration"], "summary": "Gem totals and reconciliation issues", "security": [{"staffCookie": []}], "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "Event finance summary"}}}
     },
     "/admin/api/tournaments/{id}/publish": {
-      "post": {"tags": ["Tournament administration"], "summary": "Publish versioned rules and open registration", "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "Published tournament"}}}
+      "post": {"tags": ["Tournament administration"], "summary": "Publish versioned rules and open registration", "security": [{"staffCookie": []}], "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"in": "header", "name": "x-csrf-token", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "Published tournament"}}}
     },
     "/admin/api/tournaments/{id}/start": {
-      "post": {"tags": ["Tournament administration"], "summary": "Start due bracket", "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "Admin detail"}, "409": {"description": "Not due"}}}
+      "post": {"tags": ["Tournament administration"], "summary": "Start due bracket", "security": [{"staffCookie": []}], "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"in": "header", "name": "x-csrf-token", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "Admin detail"}, "409": {"description": "Not due"}}}
     },
     "/admin/api/tournaments/{id}/cancel": {
-      "post": {"tags": ["Tournament administration"], "summary": "Cancel tournament and refund paid entries", "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"description": "Cancelled tournament"}}}
+      "post": {"tags": ["Tournament administration"], "summary": "Cancel draft/open tournament; live cancellation needs emergency role, reason and fresh TOTP", "security": [{"staffCookie": []}], "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"in": "header", "name": "x-csrf-token", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "Cancelled tournament"}, "409": {"description": "Completed tournament is locked"}}}
     },
     "/ai-rivals/": {
       "get": {
@@ -2305,6 +2317,7 @@
           "Achievements"
         ],
         "summary": "List catalogue definitions for administrators",
+        "security": [{"staffCookie": []}],
         "responses": {
           "200": {
             "description": "All definitions"
@@ -2319,6 +2332,8 @@
           "Achievements"
         ],
         "summary": "Create an achievement using a registered metric",
+        "security": [{"staffCookie": []}],
+        "parameters": [{"in": "header", "name": "x-csrf-token", "required": true, "schema": {"type": "string"}}],
         "responses": {
           "201": {
             "description": "Created"
@@ -2338,6 +2353,7 @@
           "Achievements"
         ],
         "summary": "Edit achievement presentation details",
+        "security": [{"staffCookie": []}],
         "parameters": [
           {
             "name": "id",
@@ -2346,7 +2362,8 @@
             "schema": {
               "type": "string"
             }
-          }
+          },
+          {"in": "header", "name": "x-csrf-token", "required": true, "schema": {"type": "string"}}
         ],
         "responses": {
           "200": {
@@ -2369,6 +2386,12 @@
         "scheme": "bearer",
         "bearerFormat": "JWT",
         "description": "Token returned by /auth/register or /auth/login"
+      },
+      "staffCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "pokabow_staff",
+        "description": "Dedicated staff session issued after password and second factor"
       }
     },
     "parameters": {

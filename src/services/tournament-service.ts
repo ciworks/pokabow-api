@@ -3,6 +3,7 @@ import { db } from "../db.js";
 import { clock, eligibility, lockTournament, lockTournamentPlayer, publicTournament, registrationRow,
   TournamentError, transaction, walletChange, type RegistrationRow, type TournamentRow } from "./tournament-core.js";
 import { bracket, forfeitRegistration } from "./tournament-bracket.js";
+import type { StaffRole } from "../auth/staff.js";
 
 export type TournamentConfig = {
   name: string; registrationOpensAt: string; startsAt: string; capacity: 4 | 8 | 16;
@@ -12,7 +13,7 @@ export type TournamentConfig = {
 
 async function audit(client: PoolClient, tournamentId: string, actorId: string,
   action: string, details: Record<string, unknown> = {}) {
-  await client.query(`INSERT INTO tournament_admin_audit (tournament_id, actor_id, action, details)
+  await client.query(`INSERT INTO tournament_admin_audit (tournament_id, staff_actor_id, action, details)
     VALUES ($1, $2, $3, $4)`, [tournamentId, actorId, action, JSON.stringify(details)]);
 }
 
@@ -29,10 +30,10 @@ export async function createDraft(actorId: string, config: TournamentConfig) {
       throw new TournamentError("INVALID_SCHEDULE", 400);
     const row = (await client.query<TournamentRow>(`INSERT INTO tournaments
       (name, registration_opens_at, starts_at, capacity, entry_stake, champion_prize,
-       min_table_level, min_online_wins, min_gem_balance, turn_seconds, created_by)
+       min_table_level, min_online_wins, min_gem_balance, turn_seconds, created_by_staff)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
     [...columns(config), actorId])).rows[0];
-    await audit(client, row.id, actorId, "create", { rulesVersion: row.rules_version });
+    await audit(client, row.id, actorId, "create", { rulesVersion: row.rules_version, configuration: config });
     return { tournament: publicTournament(row, 0) };
   });
 }
@@ -49,7 +50,8 @@ export async function updateDraft(actorId: string, id: string, config: Tournamen
       entry_stake=$6, champion_prize=$7, min_table_level=$8, min_online_wins=$9,
       min_gem_balance=$10, turn_seconds=$11, rules_version=rules_version+1
       WHERE id=$1 RETURNING *`, [id, ...columns(config)])).rows[0];
-    await audit(client, id, actorId, "update_draft", { rulesVersion: row.rules_version });
+    await audit(client, id, actorId, "update_draft", { rulesVersion: row.rules_version,
+      before: publicTournament(tour, 0), after: config });
     return { tournament: publicTournament(row, 0) };
   });
 }
@@ -67,17 +69,22 @@ export async function publish(actorId: string, id: string) {
     const row = (await client.query<TournamentRow>(`UPDATE tournaments SET status='open',
       published_at=clock_timestamp(), published_rules=$2 WHERE id=$1 RETURNING *`,
     [id, JSON.stringify(rules)])).rows[0];
-    await audit(client, id, actorId, "publish", { rulesVersion: row.rules_version });
+    await audit(client, id, actorId, "publish", { rulesVersion: row.rules_version, publishedRules: rules });
     return { tournament: publicTournament(row, 0) };
   });
 }
 
-export async function cancel(actorId: string, id: string) {
+export async function cancel(actorId: string, id: string, role: StaffRole, reason?: string) {
   return transaction(async client => {
     const tour = await lockTournament(client, id);
     if (tour.status === "cancelled") return { tournament: publicTournament(tour, 0) };
+    if (tour.status === "completed") throw new TournamentError("COMPLETED_TOURNAMENT_LOCKED");
+    if (role === "viewer") throw new TournamentError("STAFF_FORBIDDEN", 403);
+    if (tour.status === "live" && (role !== "emergency_operator" || !reason?.trim()))
+      throw new TournamentError("EMERGENCY_AUTH_REQUIRED", 403);
     const registrations = (await client.query<RegistrationRow>(
       "SELECT * FROM tournament_registrations WHERE tournament_id=$1 ORDER BY id FOR UPDATE", [id])).rows;
+    const refundable = registrations.filter(reg => reg.user_id && !reg.refunded_at && Number(reg.paid_stake) > 0);
     for (const reg of registrations) {
       if (reg.user_id && !reg.refunded_at && Number(reg.paid_stake) > 0) {
         await walletChange(client, reg.user_id, `${reg.id}:refund`, "tournament_refund", Number(reg.paid_stake));
@@ -90,16 +97,38 @@ export async function cancel(actorId: string, id: string) {
       WHERE tournament_id=$1 AND status IN ('waiting','ready','active')`, [id]);
     const row = (await client.query<TournamentRow>(`UPDATE tournaments SET status='cancelled',
       cancelled_at=clock_timestamp() WHERE id=$1 RETURNING *`, [id])).rows[0];
-    await audit(client, id, actorId, "cancel", { refundedEntries: registrations.filter(r => r.user_id && r.paid_stake !== "0").length });
+    await client.query(`INSERT INTO tournament_admin_audit
+      (tournament_id,staff_actor_id,action,details,reason) VALUES ($1,$2,$3,$4,$5)`,
+    [id, actorId, tour.status === "live" ? "emergency_cancel" : "cancel",
+      JSON.stringify({ statusBefore: tour.status, refundedEntries: refundable.length,
+        refundedGems: refundable.reduce((total, reg) => total + Number(reg.paid_stake), 0) }), reason ?? null]);
     return { tournament: publicTournament(row, registrations.filter(r => r.status !== "withdrawn").length) };
   });
 }
 
-export async function adminList() {
+export async function adminList(filters: { status?: string; search?: string; cursor?: string } = {}) {
+  let cursor: { startsAt: string; id: string } | null = null;
+  if (filters.cursor) {
+    try {
+      const value = JSON.parse(Buffer.from(filters.cursor, "base64url").toString("utf8"));
+      if (typeof value.startsAt !== "string" || Number.isNaN(Date.parse(value.startsAt)) ||
+          typeof value.id !== "string" || !/^[0-9a-f-]{36}$/i.test(value.id)) throw new Error();
+      cursor = value;
+    } catch { throw new TournamentError("INVALID_CURSOR", 400); }
+  }
   const found = await db.query<TournamentRow & { filled: string }>(`SELECT t.*,
     (SELECT count(*)::text FROM tournament_registrations r WHERE r.tournament_id=t.id
-      AND r.status <> 'withdrawn') AS filled FROM tournaments t ORDER BY t.starts_at DESC LIMIT 100`);
-  return { tournaments: found.rows.map(row => publicTournament(row, Number(row.filled))) };
+      AND r.status <> 'withdrawn') AS filled FROM tournaments t
+    WHERE ($1::text IS NULL OR t.status=$1)
+      AND ($2::text IS NULL OR t.name ILIKE '%' || $2 || '%')
+      AND ($3::timestamptz IS NULL OR (t.starts_at,t.id)<($3::timestamptz,$4::uuid))
+    ORDER BY t.starts_at DESC,t.id DESC LIMIT 51`,
+  [filters.status ?? null, filters.search ?? null, cursor?.startsAt ?? null, cursor?.id ?? null]);
+  const rows = found.rows.slice(0, 50);
+  const last = rows.at(-1);
+  return { tournaments: rows.map(row => publicTournament(row, Number(row.filled))),
+    nextCursor: found.rows.length > 50 && last ? Buffer.from(JSON.stringify({ startsAt: last.starts_at,
+      id: last.id })).toString("base64url") : null };
 }
 
 export async function adminDetail(id: string) {
@@ -107,13 +136,47 @@ export async function adminDetail(id: string) {
   if (!tour) throw new TournamentError("TOURNAMENT_NOT_FOUND", 404);
   const registrations = (await db.query<RegistrationRow>(
     "SELECT * FROM tournament_registrations WHERE tournament_id=$1 ORDER BY registered_at", [id])).rows;
-  const auditRows = (await db.query(`SELECT action, details, actor_id, created_at
+  const auditRows = (await db.query(`SELECT action, details, actor_id, staff_actor_id, reason, created_at
     FROM tournament_admin_audit WHERE tournament_id=$1 ORDER BY id DESC LIMIT 100`, [id])).rows;
   return { tournament: publicTournament(tour, registrations.filter(r => r.status !== "withdrawn").length),
     publishedRules: tour.published_rules,
     registrations: registrations.map(reg => ({ ...registrationRow(reg), userId: reg.user_id,
       displayName: reg.public_name })),
-    bracket: await bracket(id), audit: auditRows };
+    bracket: tour.status === "draft" ? null : await bracket(id), audit: auditRows };
+}
+
+export async function adminFinance(id: string) {
+  const tour = (await db.query<{ id: string; status: string; champion_prize: string; champion_registration_id: string | null }>(
+    "SELECT id,status,champion_prize,champion_registration_id FROM tournaments WHERE id=$1", [id])).rows[0];
+  if (!tour) throw new TournamentError("TOURNAMENT_NOT_FOUND", 404);
+  const registrations = (await db.query<RegistrationRow>(
+    "SELECT * FROM tournament_registrations WHERE tournament_id=$1", [id])).rows;
+  const rows = (await db.query<{ source_key: string; kind: string; amount: string }>(`
+    SELECT tx.source_key,tx.kind, tx.amount::text FROM gem_transactions tx
+    WHERE tx.source_key = $1::uuid::text || ':champion'
+       OR EXISTS (SELECT 1 FROM tournament_registrations r WHERE r.tournament_id=$1
+         AND tx.source_key IN (r.id::text || ':entry', r.id::text || ':refund'))`, [id])).rows;
+  const sum = (kind: string) => rows.filter(row => row.kind === kind)
+    .reduce((total, row) => total + Number(row.amount), 0);
+  const issues: string[] = [];
+  for (const reg of registrations) {
+    if (!reg.user_id || Number(reg.paid_stake) === 0) continue;
+    const entry = rows.find(row => row.source_key === `${reg.id}:entry` && row.kind === "tournament_entry");
+    const refund = rows.find(row => row.source_key === `${reg.id}:refund` && row.kind === "tournament_refund");
+    if (!entry || Number(entry.amount) !== -Number(reg.paid_stake)) issues.push(`ENTRY_MISMATCH:${reg.id}`);
+    if (reg.refunded_at && (!refund || Number(refund.amount) !== Number(reg.paid_stake)))
+      issues.push(`REFUND_MISMATCH:${reg.id}`);
+    if (!reg.refunded_at && refund) issues.push(`UNEXPECTED_REFUND:${reg.id}`);
+  }
+  const champion = registrations.find(reg => reg.id === tour.champion_registration_id);
+  const prize = rows.find(row => row.source_key === `${id}:champion` && row.kind === "tournament_prize");
+  if (tour.status === "completed" && champion?.user_id && Number(tour.champion_prize) > 0 &&
+      (!prize || Number(prize.amount) !== Number(tour.champion_prize))) issues.push("PRIZE_MISMATCH");
+  if (tour.status !== "completed" && prize) issues.push("UNEXPECTED_PRIZE");
+  return { tournamentId: id, reconciled: issues.length === 0, issues,
+    entries: { count: rows.filter(row => row.kind === "tournament_entry").length, amount: -sum("tournament_entry") },
+    refunds: { count: rows.filter(row => row.kind === "tournament_refund").length, amount: sum("tournament_refund") },
+    prize: { count: rows.filter(row => row.kind === "tournament_prize").length, amount: sum("tournament_prize") } };
 }
 
 export async function listForPlayer(userId: string) {

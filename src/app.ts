@@ -1,6 +1,8 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
+import cookie from "@fastify/cookie";
+import rateLimit from "@fastify/rate-limit";
 
 import { gameRoutes } from "./routes/games.js";
 import { authRoutes } from "./routes/auth.js";
@@ -15,12 +17,18 @@ import { verifiedAiGameRoutes } from "./routes/verified-ai-games.js";
 import { aiRivalRoutes } from "./routes/ai-rivals.js";
 import { tournamentRoutes } from "./routes/tournaments.js";
 import { tournamentAdminRoutes } from "./routes/tournament-admin.js";
+import { staffAuthRoutes } from "./routes/staff-auth.js";
 import { config } from "./config.js";
 import { db } from "./db.js";
 
 export function buildApp() {
   if (!config.jwtSecret || Buffer.byteLength(config.jwtSecret) < 32) {
     throw new Error("JWT_SECRET must be set to at least 32 bytes");
+  }
+  if (process.env.NODE_ENV === "production" &&
+      (!/^https:\/\//.test(process.env.STAFF_ORIGIN ?? "") ||
+       !/^[0-9a-f]{64}$/i.test(process.env.STAFF_ENCRYPTION_KEY ?? ""))) {
+    throw new Error("Production staff administration requires HTTPS STAFF_ORIGIN and a 32-byte STAFF_ENCRYPTION_KEY");
   }
 
   const app = Fastify({
@@ -30,6 +38,8 @@ export function buildApp() {
   app.register(cors, {
     origin: true
   });
+  app.register(cookie);
+  app.register(rateLimit, { global: false });
 
   app.register(jwt, {
     secret: config.jwtSecret,
@@ -72,6 +82,7 @@ export function buildApp() {
   app.register(verifiedAiGameRoutes, { prefix: "/ai-games" });
   app.register(aiRivalRoutes, { prefix: "/ai-rivals" });
   app.register(tournamentRoutes, { prefix: "/tournaments" });
+  app.register(staffAuthRoutes, { prefix: "/admin/api/auth" });
   app.register(tournamentAdminRoutes, { prefix: "/admin/api/tournaments" });
 
   return app;

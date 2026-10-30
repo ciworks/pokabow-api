@@ -11,7 +11,7 @@ app.addHook("onClose", async () => {
 try {
   await app.listen({
     port: config.port,
-    host: "192.168.0.215"
+    host: config.host
   });
 
   // Database time drives registration close, no-show and turn expiry even if

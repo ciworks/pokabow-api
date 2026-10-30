@@ -124,7 +124,7 @@ export async function startDueTournament(id: string, strict = false, actorId: st
       WHERE id=$1`, [reg.id, index + 1]);
     await client.query("UPDATE tournaments SET status='live' WHERE id=$1", [id]);
     await client.query(`INSERT INTO tournament_admin_audit
-      (tournament_id, actor_id, action, details) VALUES ($1,$2,$3,$4)`,
+      (tournament_id, staff_actor_id, action, details) VALUES ($1,$2,$3,$4)`,
     [id, actorId, actorId ? "start" : "automatic_start", JSON.stringify({ entrants: drawn.length })]);
     const rounds = Math.log2(tour.capacity);
     const first: MatchRow[] = [];

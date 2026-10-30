@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 
 process.env.JWT_SECRET = "tournament-route-tests-only-at-least-thirty-two-bytes";
 const { buildApp } = await import("../dist/app.js");
@@ -41,26 +42,25 @@ test("authenticated tournament routes reject malformed IDs and commands", async 
   } finally { db.query = original; await app.close(); }
 });
 
-test("admin tournament lifecycle requires an allowlisted account", async () => {
+test("admin tournament lifecycle requires a dedicated staff session", async () => {
   const app = buildApp();
   await app.ready();
   const originalQuery = db.query;
-  const originalAdmins = process.env.ADMIN_EMAILS;
   const account = randomUUID();
-  db.query = async () => ({ rows: [{ id: account, email: "player@example.test" }] });
-  const headers = { authorization: `Bearer ${app.jwt.sign({ sub: account })}` };
+  db.query = async sql => sql.includes("FROM staff_sessions")
+    ? { rows: [{ id: account, email: "staff@example.test", role: "operator" }] }
+    : { rows: [{ id: account, email: "player@example.test" }] };
+  const playerHeaders = { authorization: `Bearer ${app.jwt.sign({ sub: account })}` };
+  const headers = { cookie: "pokabow_staff=test-session",
+    "x-csrf-token": createHash("sha256").update("csrf:test-session").digest("hex") };
   try {
-    process.env.ADMIN_EMAILS = "admin@example.test";
-    assert.equal((await app.inject({ url: "/admin/api/tournaments", headers })).statusCode, 403);
-    process.env.ADMIN_EMAILS = "player@example.test";
+    assert.equal((await app.inject({ url: "/admin/api/tournaments", headers: playerHeaders })).statusCode, 401);
     assert.equal((await app.inject({ method: "POST", url: "/admin/api/tournaments",
       headers, payload: { name: "Incomplete" } })).statusCode, 400);
     assert.equal((await app.inject({ method: "POST", url: `/admin/api/tournaments/${randomUUID()}/publish`,
       headers, payload: { startsAt: "changed" } })).statusCode, 400);
   } finally {
     db.query = originalQuery;
-    if (originalAdmins === undefined) delete process.env.ADMIN_EMAILS;
-    else process.env.ADMIN_EMAILS = originalAdmins;
     await app.close();
   }
 });

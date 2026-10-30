@@ -6,9 +6,9 @@ brackets, cancels and refunds underfilled ones, and resolves join and turn
 deadlines. Time decisions use the PostgreSQL server clock. Run only one migration
 sequence per database; the scheduler is safe across multiple API instances.
 
-All routes require `Authorization: Bearer <token>`. Player routes are under
-`/tournaments`; management routes are under `/admin/api/tournaments` and require
-the same `ADMIN_EMAILS` allowlist as achievement administration. Responses carry
+Player routes require `Authorization: Bearer <token>`. Management routes are under
+`/admin/api/tournaments` and require a dedicated staff session cookie obtained
+through `/admin/api/auth/login`; mutations also require `x-csrf-token`. Responses carry
 `Cache-Control: no-store`. Errors use `{ "error": "CODE" }` and an appropriate
 HTTP status. All times are ISO UTC instants; clients should display their local
 time and zone.
@@ -41,25 +41,26 @@ The server owns the game state; client moves never determine scores or awards.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/admin/api/tournaments/` | List drafts and published tournaments. |
+| GET | `/admin/api/tournaments/` | List drafts and published tournaments, 50 per page. Optional `status`, `search`, and `cursor` query parameters. |
 | POST | `/admin/api/tournaments/` | Create draft. |
 | GET | `/admin/api/tournaments/{id}` | Rules, entrants, bracket and audit trail. |
+| GET | `/admin/api/tournaments/{id}/finance` | Staff-only Gem entry, refund and prize totals with reconciliation issues. |
 | PATCH | `/admin/api/tournaments/{id}` | Replace draft configuration. Published rules are locked. |
 | POST | `/admin/api/tournaments/{id}/publish` | Open registration under a versioned rules snapshot. |
 | POST | `/admin/api/tournaments/{id}/start` | Start only once the published start time has arrived. |
-| POST | `/admin/api/tournaments/{id}/cancel` | Cancel and refund all paid extant accounts once. |
+| POST | `/admin/api/tournaments/{id}/cancel` | Cancel a draft/open event; live cancellation needs the emergency-operator role, a reason and a fresh `totp` code. Completed events are locked. |
 
 Create and draft update bodies contain `name`, `registrationOpensAt`, `startsAt`,
 `capacity` (4, 8, or 16), `entryStake`, `championPrize`, `minTableLevel`,
 `minOnlineWins`, `minGemBalance`, and `turnLimitSeconds` (60, 120, or 300).
-All numeric amounts are nonnegative integers. Publish, start and cancel use an
-empty body. A tournament that does not fill by its scheduled start cancels and
+All numeric amounts are nonnegative integers. Publish and start use an empty
+body. Routine cancel accepts `{}`; live cancel requires
+`{ "reason": "...", "totp": "123456" }`. A tournament that does not fill by its scheduled start cancels and
 refunds automatically. Entry stakes are spent, not a prize pool. Only the
-champion receives the fixed prize, once. A later cancellation refunds stakes
-without reversing a confirmed prize or completed XP and rating changes.
+champion receives the fixed prize, once. Emergency cancellation of a live event
+refunds paid stakes without reversing completed XP and rating changes.
 
-The management API is ready for a staff web interface; this repository does not
-currently contain that interface. The Godot tournament destination also still
+The management website is in the sibling `pokabow-admin` repository. The Godot tournament destination also still
 needs to consume these endpoints. The opt-in integration suite runs against an
 empty disposable PostgreSQL database with `TOURNAMENT_TEST_DATABASE_URL` set:
 `node --test tests/tournaments-postgres.test.mjs`.

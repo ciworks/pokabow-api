@@ -6,7 +6,7 @@
 otherwise it returns 503. The game uses it for a periodic connection warning.
 
 1. Install dependencies with `npm install`.
-2. Create a PostgreSQL database and apply the numbered SQL files in `migrations/` in order through `022_passwordless_sessions.sql` (omit optional `003_test_user.sql` outside development). Existing databases should apply missing migrations in order.
+2. Create a PostgreSQL database and apply the numbered SQL files in `migrations/` in order through `023_staff_admin.sql` (omit optional `003_test_user.sql` outside development). Existing databases should apply missing migrations in order.
 3. Set `DATABASE_URL` and `JWT_SECRET` in `.env`. Use a unique random JWT secret of at least 32 bytes. To enable Google sign in, configure a Google OAuth web client and set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` (the exact registered callback URL). See `.env.example`.
 4. Run `npm run start`. The start script builds the TypeScript code first.
 
@@ -190,14 +190,43 @@ history is not
 backfilled. Client reports remain unverified gameplay evidence, as with the
 original unlock endpoint.
 
-Set `ADMIN_EMAILS` to a comma-separated list of existing account email addresses
-before using the catalogue page at `/admin/achievements`. Sign in there with one
-of those accounts. The page calls authenticated API routes; it has no direct
-PostgreSQL connection. Only registered metric types can be selected. Creating
-an achievement fixes its ID, metric, target and start date; title, description,
-category, badge key and enabled status may be edited. A badge key works only
-when the game ships matching artwork; other keys display the generic star.
-The included Fredoka font retains its OFL licence in `admin/OFL.txt`.
+Achievement catalogue API routes now use dedicated staff sessions under
+`/admin/api/achievements`. The older player-email allowlist and HTML page are
+retired. Only registered metric types can be selected. Creating an achievement
+fixes its ID, metric, target and start date; title, description, category, badge
+key and enabled status may be edited. A badge key works only when the game ships
+matching artwork; other keys display the generic star.
+
+## Staff administration
+
+Apply migration 023 and set `STAFF_ENCRYPTION_KEY` to 32 random bytes encoded
+as 64 hex characters. For the first local staff account, temporarily set
+`STAFF_BOOTSTRAP_EMAIL` and `STAFF_BOOTSTRAP_PASSWORD` (16+ characters) and run
+`npm run staff:bootstrap`. Add the printed `otpauth://` secret to an authenticator
+app, then remove the bootstrap credentials from the environment. Bootstrap
+also prints ten single-use recovery codes; save them privately. It refuses to
+run once a staff account exists.
+If the authenticator is lost or a session must be revoked, use the local
+`npm run staff:manage` command with `STAFF_MANAGE_EMAIL`,
+`STAFF_MANAGE_PASSWORD` and `STAFF_MANAGE_ACTION` (`reset-totp`, `revoke`, or
+`disable`). It revokes active sessions and records the action. Keep these
+temporary values out of production environment files after running the command.
+
+Staff sign in at `POST /admin/api/auth/login` with `{ email, password, totp }`.
+The `totp` field accepts a six-digit authenticator code or one unused recovery
+code. Emergency live cancellation always requires an authenticator code.
+The response sets an HttpOnly session cookie and returns a CSRF token. Send that
+token in `x-csrf-token` on staff mutations. `GET /admin/api/auth/me` restores
+the token after page reload; `POST /admin/api/auth/logout` revokes the session.
+Staff routes reject player JWTs. `STAFF_ORIGIN` must match the admin website's
+origin (default `http://127.0.0.1:5173` for development). Set `HOST` to the
+desired API bind address; it defaults to `0.0.0.0`.
+
+Tournament staff routes are under `/admin/api/tournaments`. Routine cancellation
+works for drafts and open events. Cancelling a live tournament requires the
+emergency-operator role, a reason of at least 10 characters and a fresh TOTP
+code. Completed tournaments cannot be cancelled. The staff website lives in
+the sibling `pokabow-admin` project.
 
 ### Engagement milestones
 
